@@ -8,7 +8,7 @@ from typing import Callable
 
 import flax
 import flax.linen as nn
-import gym
+import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -234,7 +234,7 @@ def evaluate(
             q_values = model.apply(params, obs)
             actions = q_values.argmax(axis=-1)
             actions = jax.device_get(actions)
-        next_obs, _, _, infos = envs.step(actions)
+        next_obs, _, _, _, infos = envs.step(actions)
         for info in infos:
             if "episode" in info.keys():
                 print(
@@ -323,7 +323,12 @@ def train(args=None):
         gym.spaces.Discrete,
     ), "only discrete action space is supported"
 
-    obs = envs.reset()
+    obs = envs.reset()[0]
+    # print()
+    # print(obs)
+    # print()
+    # print(type(obs))
+    # print()
 
     q_network = QNetwork(action_dim=envs.single_action_space.n)
 
@@ -381,8 +386,10 @@ def train(args=None):
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs = envs.reset()
+    obs = envs.reset()[0]
     for global_step in range(args.total_timesteps):
+        if global_step%500 == 0:
+            print(f'SPS: {int(global_step / (time.time() - start_time))}, current: {global_step}/{args.total_timesteps}')
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(
             args.start_e,
@@ -400,27 +407,30 @@ def train(args=None):
             actions = jax.device_get(actions)
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, dones, infos = envs.step(actions)
+        next_obs, rewards, dones, _, infos = envs.step(actions)
+        infos = []
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
-        for info in infos:
-            if "episode" in info.keys():
-                print(
-                    f"global_step={global_step},"
-                    f"episodic_return={info['episode']['r']}",
-                )
-                writer.add_scalar(
-                    "charts/episodic_return",
-                    info["episode"]["r"],
-                    global_step,
-                )
-                writer.add_scalar(
-                    "charts/episodic_length",
-                    info["episode"]["l"],
-                    global_step,
-                )
-                writer.add_scalar("charts/epsilon", epsilon, global_step)
-                break
+        # print(infos)
+        # print(type(infos))
+        # for info in infos:
+        #     if "episode" in info.keys():
+        #         print(
+        #             f"global_step={global_step},"
+        #             f"episodic_return={info['episode']['r']}",
+        #         )
+        #         writer.add_scalar(
+        #             "charts/episodic_return",
+        #             info["episode"]["r"],
+        #             global_step,
+        #         )
+        #         writer.add_scalar(
+        #             "charts/episodic_length",
+        #             info["episode"]["l"],
+        #             global_step,
+        #         )
+        #         writer.add_scalar("charts/epsilon", epsilon, global_step)
+        #         break
 
         # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
         real_next_obs = next_obs.copy()
@@ -434,7 +444,8 @@ def train(args=None):
                 actions[idx],
                 rewards[idx],
                 dones[idx],
-                np.array([infos[idx]]),
+                # np.array([infos[idx]]),
+                np.array([{}]),
             )
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook

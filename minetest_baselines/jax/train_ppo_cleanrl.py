@@ -9,7 +9,7 @@ from typing import Callable, Sequence
 
 import flax
 import flax.linen as nn
-import gym
+import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import numpy as np
