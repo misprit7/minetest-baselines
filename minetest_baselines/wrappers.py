@@ -158,6 +158,13 @@ class DiscreteMouseAction(MinetestWrapper):
         self.mu = mu
 
         self.mouse_action_space = gym.spaces.Discrete(self.num_mouse_actions)
+
+        # print(self.env.action_space)
+        # print()
+        # print(type(self.env.action_space))
+        # print()
+        # assert isinstance(self.env.action_space, gym.spaces.Dict)
+
         self.action_space = gym.spaces.Dict(
             {
                 **{

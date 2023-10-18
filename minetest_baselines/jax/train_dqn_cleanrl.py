@@ -405,6 +405,8 @@ def train(args=None):
     # TRY NOT TO MODIFY: start the game
     obs, _ = envs.reset()
     for global_step in range(args.total_timesteps):
+        if global_step%500 == 0:
+            print(f'SPS: {int(global_step / (time.time() - start_time))}, current: {global_step}/{args.total_timesteps}')
         # ALGO LOGIC: put action logic here
         epsilon = linear_schedule(
             args.start_e,
