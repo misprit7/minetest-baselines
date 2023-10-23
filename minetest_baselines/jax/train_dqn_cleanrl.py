@@ -188,13 +188,13 @@ def make_env(env_id, seed, idx, capture_video, run_name):
             x_display=4,
         )
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        if capture_video:
-            if idx == 0 or idx < 0:
-                env = gym.wrappers.RecordVideo(
-                    env,
-                    f"videos/{run_name}",
-                    lambda x: x % 100 == 0,
-                )
+        # if capture_video:
+        #     if idx == 0 or idx < 0:
+        #         env = gym.wrappers.RecordVideo(
+        #             env,
+        #             f"videos/{run_name}",
+        #             lambda x: x % 100 == 0,
+        #         )
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -216,7 +216,7 @@ def evaluate(
     envs = gym.vector.SyncVectorEnv(
         [make_env(env_id, seed, -1, capture_video, run_name)],
     )
-    obs = envs.reset()
+    obs = envs.reset()[0]
     model = Model(action_dim=envs.single_action_space.n)
     q_key = jax.random.PRNGKey(seed)
     params = model.init(q_key, obs)
@@ -235,13 +235,13 @@ def evaluate(
             actions = q_values.argmax(axis=-1)
             actions = jax.device_get(actions)
         next_obs, _, _, _, infos = envs.step(actions)
-        for info in infos:
-            if "episode" in info.keys():
-                print(
-                    f"eval_episode={len(episodic_returns)},"
-                    f"episodic_return={info['episode']['r']}",
-                )
-                episodic_returns += [info["episode"]["r"]]
+        # for info in infos:
+        #     if "episode" in info.keys():
+        #         print(
+        #             f"eval_episode={len(episodic_returns)},"
+        #             f"episodic_return={info['episode']['r']}",
+        #         )
+        #         episodic_returns += [info["episode"]["r"]]
         obs = next_obs
 
     return episodic_returns
