@@ -337,7 +337,9 @@ def train(args=None):
         gym.spaces.Discrete,
     ), "only discrete action space is supported"
 
+    print('before')
     obs, _ = envs.reset()
+    print('after')
 
     q_network = QNetwork(action_dim=envs.single_action_space.n)
 
