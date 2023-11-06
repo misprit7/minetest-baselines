@@ -140,6 +140,47 @@ class SelectKeyActions(MinetestWrapper):
         return self.env.step(full_action)
 
 
+class ContinuousMouseAction(MinetestWrapper):
+    def __init__(self, env, max_mouse_move=50):
+        super().__init__(env)
+        self.max_mouse_move = max_mouse_move
+
+        # Define a continuous action space for mouse movement
+        self.mouse_action_space = gym.spaces.Box(
+            low=np.array([-max_mouse_move, -max_mouse_move]),
+            high=np.array([max_mouse_move, max_mouse_move]),
+            dtype=np.float32,
+        )
+
+        self.action_space = gym.spaces.Dict(
+            {
+                **{
+                    key: space
+                    for key, space in self.env.action_space.items()
+                    if key != "MOUSE"
+                },
+                **{"MOUSE": self.mouse_action_space},
+            }
+        )
+
+    def step(self, action):
+        # Extract continuous mouse action from the action dictionary
+        mouse_action = action["MOUSE"]
+        if not isinstance(mouse_action, np.ndarray):
+            mouse_action = np.ndarray(mouse_action)
+        if mouse_action.shape == ():
+            mouse_action = mouse_action[None]
+        
+        # Clip the mouse action to stay within the defined range
+        mouse_action = np.clip(mouse_action, -self.max_mouse_move, self.max_mouse_move)
+        
+        # Update the mouse action in the action dictionary
+        action["MOUSE"] = mouse_action
+        
+        # Forward the modified action to the underlying environment
+        return self.env.step(action)
+
+
 class DiscreteMouseAction(MinetestWrapper):
     def __init__(
         self,

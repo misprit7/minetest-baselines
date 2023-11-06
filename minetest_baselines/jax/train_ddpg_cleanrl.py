@@ -121,46 +121,34 @@ def parse_args(args=None):
         help="the target network update rate",
     )
     parser.add_argument(
-        "--target-network-frequency",
-        type=int,
-        default=10000,
-        help="the timesteps it takes to update the target network",
-    )
-    parser.add_argument(
         "--batch-size",
         type=int,
         default=128,
         help="the batch size of sample from the reply memory",
     )
     parser.add_argument(
-        "--start-e",
-        type=float,
-        default=1,
-        help="the starting epsilon for exploration",
+    	"--exploration-noise", 
+    	type=float, 
+    	default=0.1,
+        help="the scale of exploration noise",
     )
     parser.add_argument(
-        "--end-e",
-        type=float,
-        default=0.01,
-        help="the ending epsilon for exploration",
+    	"--learning-starts", 
+    	type=int, 
+    	default=25e3,
+        help="timestep to start learning"
     )
     parser.add_argument(
-        "--exploration-fraction",
-        type=float,
-        default=0.9,
-        help="the fraction of `total-timesteps` it takes from start-e to go end-e",
+    	"--policy-frequency",
+    	type=int, 
+    	default=2,
+        help="the frequency of training policy (delayed)"
     )
     parser.add_argument(
-        "--learning-starts",
-        type=int,
-        default=5000,
-        help="timestep to start learning",
-    )
-    parser.add_argument(
-        "--train-frequency",
-        type=int,
-        default=10,
-        help="the frequency of training",
+    	"--noise-clip", 
+    	type=float, 
+    	default=0.5,
+        help="noise clip parameter of the Target Policy Smoothing Regularization"
     )
     parser.add_argument(
         "--num-envs",
@@ -202,6 +190,8 @@ def make_env(env_id, seed, idx, capture_video, run_name):
     return thunk
 
 
+
+
 def evaluate(
     model_path: str,
     make_env: Callable,
@@ -209,39 +199,52 @@ def evaluate(
     eval_episodes: int,
     run_name: str,
     Model: nn.Module,
-    epsilon: float = 0.05,
     capture_video: bool = True,
+    exploration_noise: float = 0.1,
     seed=1,
 ):
     envs = gym.vector.SyncVectorEnv(
         [make_env(env_id, seed, -1, capture_video, run_name)],
     )
-    obs = envs.reset()[0]
-    model = Model(action_dim=envs.single_action_space.n)
-    q_key = jax.random.PRNGKey(seed)
-    params = model.init(q_key, obs)
+    obs, _ = envs.reset()
+
+    Actor, QNetwork = Model
+    action_scale = np.array((envs.action_space.high - envs.action_space.low) / 2.0)
+    action_bias = np.array((envs.action_space.high + envs.action_space.low) / 2.0)
+    actor = Actor(
+        action_dim=np.prod(envs.single_action_space.shape),
+        action_scale=action_scale,
+        action_bias=action_bias,
+    )
+    qf = QNetwork()
+    key = jax.random.PRNGKey(seed)
+    key, actor_key, qf_key = jax.random.split(key, 3)
+    actor_params = actor.init(actor_key, obs)
+    qf_params = qf.init(qf_key, obs, envs.action_space.sample())
+    # note: qf_params is not used in this script
     with open(model_path, "rb") as f:
-        params = flax.serialization.from_bytes(params, f.read())
-    model.apply = jax.jit(model.apply)
+        (actor_params, qf_params) = flax.serialization.from_bytes((actor_params, qf_params), f.read())
+    actor.apply = jax.jit(actor.apply)
+    qf.apply = jax.jit(qf.apply)
 
     episodic_returns = []
     while len(episodic_returns) < eval_episodes:
-        if random.random() < epsilon:
-            actions = np.array(
-                [envs.single_action_space.sample() for _ in range(envs.num_envs)],
-            )
-        else:
-            q_values = model.apply(params, obs)
-            actions = q_values.argmax(axis=-1)
-            actions = jax.device_get(actions)
+        actions = actor.apply(actor_params, obs)
+        actions = np.array(
+            [
+                (jax.device_get(actions)[0] + np.random.normal(0, action_scale * exploration_noise)[0]).clip(
+                    envs.single_action_space.low, envs.single_action_space.high
+                )
+            ]
+        )
+
         next_obs, _, _, _, infos = envs.step(actions)
-        # for info in infos:
-        #     if "episode" in info.keys():
-        #         print(
-        #             f"eval_episode={len(episodic_returns)},"
-        #             f"episodic_return={info['episode']['r']}",
-        #         )
-        #         episodic_returns += [info["episode"]["r"]]
+        if "final_info" in infos:
+            for info in infos["final_info"]:
+                if "episode" not in info:
+                    continue
+                print(f"eval_episode={len(episodic_returns)}, episodic_return={info['episode']['r']}")
+                episodic_returns += [info["episode"]["r"]]
         obs = next_obs
 
     return episodic_returns
@@ -249,34 +252,36 @@ def evaluate(
 
 # ALGO LOGIC: initialize agent here:
 class QNetwork(nn.Module):
+    @nn.compact
+    def __call__(self, x: jnp.ndarray, a: jnp.ndarray):
+        x = jnp.concatenate([x, a], -1)
+        x = nn.Dense(256)(x)
+        x = nn.relu(x)
+        x = nn.Dense(256)(x)
+        x = nn.relu(x)
+        x = nn.Dense(1)(x)
+        return x
+        
+        
+class Actor(nn.Module):
     action_dim: int
+    action_scale: jnp.ndarray
+    action_bias: jnp.ndarray
 
     @nn.compact
-    def __call__(self, x: jnp.ndarray):
-        # shape = (batch, stack, img_x, img_y)
-        batch_dim = x.shape[0]
-        x = x / 255.0
-        x = jnp.transpose(x, (0, 2, 3, 1))  # shape = (batch, img x, img y, stack)
-        x = nn.Conv(features=32, kernel_size=(8, 8), strides=(4, 4), padding="VALID")(x)
+    def __call__(self, x):
+        x = nn.Dense(256)(x)
         x = nn.relu(x)
-        x = nn.Conv(features=64, kernel_size=(4, 4), strides=(2, 2), padding="VALID")(x)
-        x = nn.relu(x)
-        x = nn.Conv(features=64, kernel_size=(3, 3), strides=(1, 1), padding="VALID")(x)
-        x = nn.relu(x)
-        x = x.reshape((batch_dim, -1))  # shape = (batch, output features)
-        x = nn.Dense(512)(x)
+        x = nn.Dense(256)(x)
         x = nn.relu(x)
         x = nn.Dense(self.action_dim)(x)
+        x = nn.tanh(x)
+        x = x * self.action_scale + self.action_bias
         return x
 
 
 class TrainState(TrainState):
     target_params: flax.core.FrozenDict
-
-
-def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
-    slope = (end_e - start_e) / duration
-    return max(slope * t + start_e, end_e)
 
 
 def train(args=None):
@@ -308,7 +313,7 @@ def train(args=None):
     random.seed(args.seed)
     np.random.seed(args.seed)
     key = jax.random.PRNGKey(args.seed)
-    key, q_key = jax.random.split(key, 2)
+    key, actor_key, qf1_key = jax.random.split(key, 3)
 
     # env setup
     xserver = start_xserver(4)
@@ -320,8 +325,19 @@ def train(args=None):
     )
     assert isinstance(
         envs.single_action_space,
-        gym.spaces.Discrete,
-    ), "only discrete action space is supported"
+        gym.spaces.Box,
+    ), "only continuous action space is supported"
+
+
+    max_action = float(envs.single_action_space.high[0])
+    envs.single_observation_space.dtype = np.float32
+    rb = ReplayBuffer(
+        args.buffer_size,
+        envs.single_observation_space,
+        envs.single_action_space,
+        device="cpu",
+        handle_timeout_termination=False,
+    )
 
     obs = envs.reset()[0]
     # print()
@@ -330,85 +346,95 @@ def train(args=None):
     # print(type(obs))
     # print()
 
-    q_network = QNetwork(action_dim=envs.single_action_space.n)
-
-    q_state = TrainState.create(
-        apply_fn=q_network.apply,
-        params=q_network.init(q_key, obs),
-        target_params=q_network.init(q_key, obs),
+    actor = Actor(
+        action_dim=np.prod(envs.single_action_space.shape),
+        action_scale=jnp.array((envs.action_space.high - envs.action_space.low) / 2.0),
+        action_bias=jnp.array((envs.action_space.high + envs.action_space.low) / 2.0),
+    )
+    actor_state = TrainState.create(
+        apply_fn=actor.apply,
+        params=actor.init(actor_key, obs),
+        target_params=actor.init(actor_key, obs),
         tx=optax.adam(learning_rate=args.learning_rate),
     )
-
-    q_network.apply = jax.jit(q_network.apply)
-    # This step is not necessary as init called on same observation
-    # and key will always lead to same initializations
-    q_state = q_state.replace(
-        target_params=optax.incremental_update(
-            q_state.params,
-            q_state.target_params,
-            1,
-        ),
+    qf = QNetwork()
+    qf1_state = TrainState.create(
+        apply_fn=qf.apply,
+        params=qf.init(qf1_key, obs, envs.action_space.sample()),
+        target_params=qf.init(qf1_key, obs, envs.action_space.sample()),
+        tx=optax.adam(learning_rate=args.learning_rate),
     )
-
-    rb = ReplayBuffer(
-        args.buffer_size,
-        envs.single_observation_space,
-        envs.single_action_space,
-        "cpu",
-        n_envs=args.num_envs,
-        handle_timeout_termination=True,
-    )
+    actor.apply = jax.jit(actor.apply)
+    qf.apply = jax.jit(qf.apply)
 
     @jax.jit
-    def update(q_state, observations, actions, next_observations, rewards, dones):
-        q_next_target = q_network.apply(
-            q_state.target_params,
-            next_observations,
-        )  # (batch_size, num_actions)
-        q_next_target = jnp.max(q_next_target, axis=-1)  # (batch_size,)
-        next_q_value = rewards + (1 - dones) * args.gamma * q_next_target
+    def update_critic(
+        actor_state: TrainState,
+        qf1_state: TrainState,
+        observations: np.ndarray,
+        actions: np.ndarray,
+        next_observations: np.ndarray,
+        rewards: np.ndarray,
+        terminations: np.ndarray,
+    ):
+        next_state_actions = (actor.apply(actor_state.target_params, next_observations)).clip(-1, 1)  # TODO: proper clip
+        qf1_next_target = qf.apply(qf1_state.target_params, next_observations, next_state_actions).reshape(-1)
+        next_q_value = (rewards + (1 - terminations) * args.gamma * (qf1_next_target)).reshape(-1)
 
         def mse_loss(params):
-            q_pred = q_network.apply(params, observations)  # (batch_size, num_actions)
-            q_pred = q_pred[
-                np.arange(q_pred.shape[0]),
-                actions.squeeze(),
-            ]  # (batch_size,)
-            return ((q_pred - next_q_value) ** 2).mean(), q_pred
+            qf_a_values = qf.apply(params, observations, actions).squeeze()
+            return ((qf_a_values - next_q_value) ** 2).mean(), qf_a_values.mean()
 
-        (loss_value, q_pred), grads = jax.value_and_grad(mse_loss, has_aux=True)(
-            q_state.params,
+        (qf1_loss_value, qf1_a_values), grads1 = jax.value_and_grad(mse_loss, has_aux=True)(qf1_state.params)
+        qf1_state = qf1_state.apply_gradients(grads=grads1)
+
+        return qf1_state, qf1_loss_value, qf1_a_values
+
+
+    @jax.jit
+    def update_actor(
+        actor_state: TrainState,
+        qf1_state: TrainState,
+        observations: np.ndarray,
+    ):
+        def actor_loss(params):
+            return -qf.apply(qf1_state.params, observations, actor.apply(params, observations)).mean()
+
+        actor_loss_value, grads = jax.value_and_grad(actor_loss)(actor_state.params)
+        actor_state = actor_state.apply_gradients(grads=grads)
+        actor_state = actor_state.replace(
+            target_params=optax.incremental_update(actor_state.params, actor_state.target_params, args.tau)
         )
-        q_state = q_state.apply_gradients(grads=grads)
-        return loss_value, q_pred, q_state
+
+        qf1_state = qf1_state.replace(
+            target_params=optax.incremental_update(qf1_state.params, qf1_state.target_params, args.tau)
+        )
+        return actor_state, qf1_state, actor_loss_value
+
 
     initialise_tracking()
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
-    obs = envs.reset()[0]
+    # obs = envs.reset()[0] # this line is not included in CleanRL for ddpg. Why?
     for global_step in range(args.total_timesteps):
         if global_step%500 == 0:
             print(f'SPS: {int(global_step / (time.time() - start_time))}, current: {global_step}/{args.total_timesteps}')
         # ALGO LOGIC: put action logic here
-        epsilon = linear_schedule(
-            args.start_e,
-            args.end_e,
-            args.exploration_fraction * args.total_timesteps,
-            global_step,
-        )
-        if random.random() < epsilon:
-            actions = np.array(
-                [envs.single_action_space.sample() for _ in range(envs.num_envs)],
-            )
+        if global_step < args.learning_starts:
+            actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
         else:
-            q_values = q_network.apply(q_state.params, obs)
-            actions = q_values.argmax(axis=-1)
-            actions = jax.device_get(actions)
+            actions = actor.apply(actor_state.params, obs)
+            actions = np.array(
+                [
+                    (jax.device_get(actions)[0] + np.random.normal(0, actor.action_scale * args.exploration_noise)[0]).clip(
+                        envs.single_action_space.low, envs.single_action_space.high
+                    )
+                ]
+            )
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, dones, _, infos = envs.step(actions)
-        infos = []
+        next_obs, rewards, terminations, truncations, infos = envs.step(actions)
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         # print(infos)
@@ -432,66 +458,43 @@ def train(args=None):
         #         writer.add_scalar("charts/epsilon", epsilon, global_step)
         #         break
 
-        # TRY NOT TO MODIFY: save data to reply buffer; handle `terminal_observation`
+        # TRY NOT TO MODIFY: save data to replay buffer; handle `final_observation`
         real_next_obs = next_obs.copy()
-        for idx, d in enumerate(dones):
-            if d:
-                real_next_obs[idx] = infos[idx]["terminal_observation"]
-        for idx in range(obs.shape[0]):
-            rb.add(
-                obs[idx],
-                real_next_obs[idx],
-                actions[idx],
-                rewards[idx],
-                dones[idx],
-                # np.array([infos[idx]]),
-                np.array([{}]),
-            )
+        for idx, trunc in enumerate(truncations):
+            if trunc:
+                real_next_obs[idx] = infos["final_observation"][idx]
+        rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
 
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
-            if global_step % args.train_frequency == 0:
-                data = rb.sample(args.batch_size)
-                # perform a gradient-descent step
-                loss, old_val, q_state = update(
-                    q_state,
+            data = rb.sample(args.batch_size)
+
+            qf1_state, qf1_loss_value, qf1_a_values = update_critic(
+                actor_state,
+                qf1_state,
+                data.observations.numpy(),
+                data.actions.numpy(),
+                data.next_observations.numpy(),
+                data.rewards.flatten().numpy(),
+                data.dones.flatten().numpy(),
+            )
+            if global_step % args.policy_frequency == 0:
+                actor_state, qf1_state, actor_loss_value = update_actor(
+                    actor_state,
+                    qf1_state,
                     data.observations.numpy(),
-                    data.actions.numpy(),
-                    data.next_observations.numpy(),
-                    data.rewards.flatten().numpy(),
-                    data.dones.flatten().numpy(),
                 )
 
-                if global_step % 100 == 0:
-                    writer.add_scalar(
-                        "losses/td_loss",
-                        jax.device_get(loss),
-                        global_step,
-                    )
-                    writer.add_scalar(
-                        "losses/q_values",
-                        jax.device_get(old_val).mean(),
-                        global_step,
-                    )
-                    print("SPS:", int(global_step / (time.time() - start_time)))
-                    writer.add_scalar(
-                        "charts/SPS",
-                        int(global_step / (time.time() - start_time)),
-                        global_step,
-                    )
+            if global_step % 100 == 0:
+                writer.add_scalar("losses/qf1_loss", qf1_loss_value.item(), global_step)
+                writer.add_scalar("losses/qf1_values", qf1_a_values.item(), global_step)
+                writer.add_scalar("losses/actor_loss", actor_loss_value.item(), global_step)
+                print("SPS:", int(global_step / (time.time() - start_time)))
+                writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
-            # update target network
-            if global_step % args.target_network_frequency == 0:
-                q_state = q_state.replace(
-                    target_params=optax.incremental_update(
-                        q_state.params,
-                        q_state.target_params,
-                        args.tau,
-                    ),
-                )
 
     # Close training envs
     envs.close()
@@ -510,10 +513,10 @@ def train(args=None):
             model_path,
             make_env,
             args.env_id,
-            eval_episodes=1,
+            eval_episodes=10,
             run_name=f"{run_name}-eval",
-            Model=QNetwork,
-            epsilon=0.05,
+            Model=(Actor, QNetwork),
+            exploration_noise=args.exploration_noise,
             seed=args.seed,
         )
         for idx, episodic_return in enumerate(episodic_returns):
@@ -528,7 +531,7 @@ def train(args=None):
                 args,
                 episodic_returns,
                 repo_id,
-                "DQN",
+                "DDPG",
                 f"runs/{run_name}",
                 f"videos/{run_name}-eval",
             )
