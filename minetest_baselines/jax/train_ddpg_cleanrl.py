@@ -255,7 +255,6 @@ def evaluate(
 class QNetwork(nn.Module):
     @nn.compact
     def __call__(self, x: jnp.ndarray, a: jnp.ndarray):
-        print("wtf yo")
         x = jnp.flatnonzero(x)
         x = jnp.concatenate([x, jnp.flatnonzero(a)], -1)
         x = nn.Dense(256)(x)
@@ -422,6 +421,7 @@ def train(args=None):
     # TRY NOT TO MODIFY: start the game
     # obs = envs.reset()[0] # this line is not included in CleanRL for ddpg. Why?
     for global_step in range(args.total_timesteps):
+        print(global_step)
         if global_step%500 == 0:
             print(f'SPS: {int(global_step / (time.time() - start_time))}, current: {global_step}/{args.total_timesteps}')
         # ALGO LOGIC: put action logic here
@@ -436,11 +436,10 @@ def train(args=None):
                     )
                 ]
             )
-        
-        print(actions)
+
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, terminations, truncations, infos = envs.step(actions[0])
+        next_obs, rewards, terminations, truncations, infos = envs.step(actions)
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         # print(infos)
@@ -473,7 +472,7 @@ def train(args=None):
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
-
+	
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
             data = rb.sample(args.batch_size)

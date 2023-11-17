@@ -330,8 +330,6 @@ def train(args=None):
     # print()
     # print(type(obs))
     # print()
-    print("wazzzzzzzzzzzzzzzzzzzup")
-    print(envs.action_space.sample().shape)
 
     q_network = QNetwork(action_dim=envs.single_action_space.n)
 
@@ -409,7 +407,6 @@ def train(args=None):
             actions = q_values.argmax(axis=-1)
             actions = jax.device_get(actions)
             
-        print(actions["JUMP"])
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, dones, _, infos = envs.step(actions)

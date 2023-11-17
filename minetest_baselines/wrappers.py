@@ -76,12 +76,26 @@ class DictToMultiDiscreteActions(gym.Wrapper):
 class DictToContinuousActions(gym.Wrapper):
     def __init__(self, env: gym.Env):
         assert isinstance(env.action_space, gym.spaces.Dict)
+        space_dims = {}
+        combined_shape = []
+        for key, space in env.action_space.items():
+            if isinstance(space, gym.spaces.Discrete):
+                combined_shape += [space.n]
+                space_dims[key] = 1
+            elif isinstance(space, gym.spaces.MultiDiscrete):
+                combined_shape += space.nvec.tolist()
+                space_dims[key] = len(space.nvec.shape)
         super().__init__(env)
+        self.space_dims = space_dims
         self.action_space = gym.spaces.utils.flatten_space(env.action_space)
-        self.action_shape = self.action_space.shape
 
     def step(self, action):
-        return self.env.step(action)
+        dict_action = {}
+        pointer = 0
+        for key, dim in self.space_dims.items():
+            dict_action[key] = action[pointer : pointer + dim].squeeze()
+            pointer += dim
+        return self.env.step(dict_action)
         
 
 class GroupKeyActions(MinetestWrapper):

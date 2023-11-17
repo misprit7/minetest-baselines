@@ -1,0 +1,15 @@
+enable_damage = true
+creative_mode = false
+mod_storage_backend = sqlite3
+auth_backend = sqlite3
+player_backend = sqlite3
+backend = sqlite3
+gameid = minetest
+world_name = 7e11cd75-77cb-4c34-b91e-db2210d5a64d
+load_mod_treechop_v3 = false
+load_mod_random_v1 = false
+load_mod_treechop_v1 = false
+load_mod_rewards = false
+load_mod_info = false
+load_mod_treechop_v2 = false
+load_mod_random_v2 = false
