@@ -71,7 +71,18 @@ class DictToMultiDiscreteActions(gym.Wrapper):
             dict_action[key] = action[pointer : pointer + dim].squeeze()
             pointer += dim
         return self.env.step(dict_action)
+    
+        
+class DictToContinuousActions(gym.Wrapper):
+    def __init__(self, env: gym.Env):
+        assert isinstance(env.action_space, gym.spaces.Dict)
+        super().__init__(env)
+        self.action_space = gym.spaces.utils.flatten_space(env.action_space)
+        self.action_shape = self.action_space.shape
 
+    def step(self, action):
+        return self.env.step(action)
+        
 
 class GroupKeyActions(MinetestWrapper):
     def __init__(
@@ -115,6 +126,29 @@ class GroupKeyActions(MinetestWrapper):
                 for gidx, gkey in enumerate(group):
                     ungrouped_action[gkey] = group_action == gidx + 1
         return self.env.step(ungrouped_action)
+
+
+class SelectContinuousKeyActions(MinetestWrapper):
+    def __init__(
+        self,
+        env: gym.Env,
+        select_keys: Set[str] = KEY_MAP.keys(),
+    ):
+        super().__init__(env)
+        for key in select_keys:
+            assert key in KEY_MAP, f"Selected key '{key}' is not supported."
+        self.selected_keys = select_keys
+        self.action_space = gym.spaces.Dict(
+            {
+                **{key: gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32) for key in self.selected_keys},
+                **{"MOUSE": self.env.action_space["MOUSE"]},
+            },
+        )
+
+    def step(self, action):
+        full_action = NOOP_ACTION
+        full_action.update(action)
+        return self.env.step(full_action)
 
 
 class SelectKeyActions(MinetestWrapper):
@@ -200,12 +234,6 @@ class DiscreteMouseAction(MinetestWrapper):
 
         self.mouse_action_space = gym.spaces.Discrete(self.num_mouse_actions)
 
-        # print(self.env.action_space)
-        # print()
-        # print(type(self.env.action_space))
-        # print()
-        # assert isinstance(self.env.action_space, gym.spaces.Dict)
-
         self.action_space = gym.spaces.Dict(
             {
                 **{
@@ -261,36 +289,20 @@ if __name__ == "__main__":
 
     env = Minetest(seed=1)
 
-    env = DiscreteMouseAction(
+    env = ContinuousMouseAction(
         env,
-        num_mouse_bins=5,
         max_mouse_move=50,
-        quantization_scheme="linear",
     )
-    # Visualize the discretization of mouse actions
-    x = np.linspace(-80, 80, 1000)  # in pixels
-    x0 = np.zeros_like(x)
-    x = np.vstack((x, x0))
-    x_disc = env.discretize(x)
-    plt.plot(x[0, :], x_disc[0, :], label="discretized")
-    x_recon = env.undiscretize(x_disc)
-    plt.scatter(x_recon[0, :], x_disc[0, :], label="undiscretized")
-    plt.grid()
-    plt.xlabel("pixels")
-    plt.ylabel("bins")
-    plt.legend()
-    plt.show()
 
     # Only use a subset of the available keys
-    env = SelectKeyActions(
+    env = SelectContinuousKeyActions(
         env,
         select_keys={"FORWARD", "BACKWARD", "LEFT", "RIGHT", "JUMP", "DIG"},
     )
     # Combine mutually exclusive actions into key groups
-    env = GroupKeyActions(env, groups=[{"FORWARD", "BACKWARD"}, {"LEFT", "RIGHT"}])
+    # env = GroupKeyActions(env, groups=[{"FORWARD", "BACKWARD"}, {"LEFT", "RIGHT"}])
 
-    env = DictToMultiDiscreteActions(env)
-    env = FlattenMultiDiscreteActions(env)
+    env = DictToContinuousActions(env)
 
     # Render a few steps with the new action space
     env.reset()

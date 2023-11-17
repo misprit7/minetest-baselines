@@ -105,7 +105,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--buffer-size",
         type=int,
-        default=500000,
+        default=5000, # usually 500000
         help="the replay memory buffer size",
     )
     parser.add_argument(
@@ -220,6 +220,7 @@ def evaluate(
     key = jax.random.PRNGKey(seed)
     key, actor_key, qf_key = jax.random.split(key, 3)
     actor_params = actor.init(actor_key, obs)
+    print(envs.action_space.sample())
     qf_params = qf.init(qf_key, obs, envs.action_space.sample())
     # note: qf_params is not used in this script
     with open(model_path, "rb") as f:
@@ -254,7 +255,9 @@ def evaluate(
 class QNetwork(nn.Module):
     @nn.compact
     def __call__(self, x: jnp.ndarray, a: jnp.ndarray):
-        x = jnp.concatenate([x, a], -1)
+        print("wtf yo")
+        x = jnp.flatnonzero(x)
+        x = jnp.concatenate([x, jnp.flatnonzero(a)], -1)
         x = nn.Dense(256)(x)
         x = nn.relu(x)
         x = nn.Dense(256)(x)
@@ -323,11 +326,11 @@ def train(args=None):
             for i in range(args.num_envs)
         ],
     )
+
     assert isinstance(
         envs.single_action_space,
         gym.spaces.Box,
     ), "only continuous action space is supported"
-
 
     max_action = float(envs.single_action_space.high[0])
     envs.single_observation_space.dtype = np.float32
@@ -358,6 +361,7 @@ def train(args=None):
         tx=optax.adam(learning_rate=args.learning_rate),
     )
     qf = QNetwork()
+
     qf1_state = TrainState.create(
         apply_fn=qf.apply,
         params=qf.init(qf1_key, obs, envs.action_space.sample()),
@@ -432,9 +436,11 @@ def train(args=None):
                     )
                 ]
             )
+        
+        print(actions)
 
         # TRY NOT TO MODIFY: execute the game and log data.
-        next_obs, rewards, terminations, truncations, infos = envs.step(actions)
+        next_obs, rewards, terminations, truncations, infos = envs.step(actions[0])
 
         # TRY NOT TO MODIFY: record rewards for plotting purposes
         # print(infos)

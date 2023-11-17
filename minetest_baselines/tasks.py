@@ -4,11 +4,13 @@ from minetester.minetest_env import Minetest
 
 from minetest_baselines.wrappers import (
     AlwaysDig,
+    DictToContinuousActions,
     DictToMultiDiscreteActions,
     ContinuousMouseAction,
     DiscreteMouseAction,
     FlattenMultiDiscreteActions,
     PenalizeJumping,
+    SelectContinuousKeyActions,
     SelectKeyActions,
 )
 
@@ -55,18 +57,22 @@ def wrapped_treechop_continuous_env(**kwargs):
     # make breaking blocks easier to learn
     env = AlwaysDig(env)
     # only allow basic movements
-    env = SelectKeyActions(env, select_keys={"FORWARD", "JUMP"})
+    env = SelectContinuousKeyActions(env, select_keys={"FORWARD", "JUMP"})
     # jumping usually interrupts progress towards
     # breaking nodes; apply penalty to learn faster
     env = PenalizeJumping(env, 0.01)
-    # transform into pure discrete action space
-    env = DictToMultiDiscreteActions(env)
-    env = FlattenMultiDiscreteActions(env)
+    # transform into pure continuous action space
+    env = DictToContinuousActions(env)
+    #env = FlattenMultiContinuousActions(env)
     # simplify observations
+    print(env.action_space.sample().shape)
     env = ResizeObservation(env, (64, 64))
+    print(env.action_space.sample().shape)
     env = GrayScaleObservation(env, keep_dim=False)
+    print(env.action_space.sample().shape)
     # facilitate learning dynamics
     env = FrameStack(env, 4)
+    print(env.action_space.sample().shape)
     return env
 
 
