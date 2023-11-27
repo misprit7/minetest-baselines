@@ -82,6 +82,18 @@ def parse_args(args=None):
         default="",
         help="the user or org name of the model repository from the Hugging Face Hub",
     )
+    parser.add_argument(
+        "--world-dir",
+        type=str,
+        default=None,
+        help="the path to an existing world directory",
+    )
+    parser.add_argument(
+        "--config-path",
+        type=str,
+        default=None,
+        help="the path to an existing minetest.conf file",
+    )
 
     # Algorithm specific arguments
     parser.add_argument(
@@ -175,7 +187,7 @@ def parse_args(args=None):
     return args
 
 
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(env_id, seed, idx, capture_video, run_name, world_dir, config_path):
     def thunk():
         # TODO train agent on diverse seeds / biomes / conditions
         env = gym.make(
@@ -186,15 +198,18 @@ def make_env(env_id, seed, idx, capture_video, run_name):
             env_port=5555 + idx,
             server_port=30000 + idx,
             x_display=4,
+            world_dir=world_dir,
+            render_mode='rgb_array',
+            config_path=config_path,
         )
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        # if capture_video:
-        #     if idx == 0 or idx < 0:
-        #         env = gym.wrappers.RecordVideo(
-        #             env,
-        #             f"videos/{run_name}",
-        #             lambda x: x % 100 == 0,
-        #         )
+        if capture_video:
+            if idx == 0 or idx < 0:
+                env = gym.wrappers.RecordVideo(
+                    env,
+                    f"videos/{run_name}",
+                    lambda x: x % 100 == 0,
+                )
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -314,7 +329,7 @@ def train(args=None):
     xserver = start_xserver(4)
     envs = gym.vector.SyncVectorEnv(
         [
-            make_env(args.env_id, args.seed, i, args.capture_video, run_name)
+            make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.world_dir, args.config_path)
             for i in range(args.num_envs)
         ],
     )

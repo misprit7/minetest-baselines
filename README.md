@@ -34,6 +34,17 @@ python -m minetest_baselines.train --algo ALGO_NAME --help
 ```
 When tracking experiments and uploading models, make sure to export wandb and huggingface tokens or to login using `wandb login` and `huggingface-cli login`.
 
+## Set Up a Persistent World/Spawnpoint
+Create a new world in minetest and save it to a folder.
+Create a corresponding minetest.conf file containing a single line
+```
+static_spawnpoint = (<x>,<y>,<z>)
+```
+Then, add the following arguments to the training command:
+```
+--world-dir [WORLD_PATH] --config-path [CONFIG_FILE_PATH]
+```
+
 ## Contributing
 Please raise an issue before creating a pull request.
 To install developer tools run

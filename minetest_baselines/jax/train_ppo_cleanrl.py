@@ -102,6 +102,18 @@ def parse_args(args=None):
         default="",
         help="the user or org name of the model repository from the Hugging Face Hub",
     )
+    parser.add_argument(
+        "--world-dir",
+        type=str,
+        default=None,
+        help="the path to an existing world directory",
+    )
+    parser.add_argument(
+        "--config-path",
+        type=str,
+        default=None,
+        help="the path to an existing minetest.conf file",
+    )
 
     # Algorithm specific arguments
     parser.add_argument(
@@ -224,6 +236,9 @@ def make_env(env_id, seed, idx, capture_video, run_name):
             env_port=5555 + idx,
             server_port=30000 + idx,
             x_display=4,
+            world_dir=world_dir,
+            render_mode='rgb_array',
+            config_path=config_path,
         )
         if capture_video:
             if idx == 0 or idx < 0:
@@ -451,7 +466,7 @@ def train(args=None):
     xserver = start_xserver(4)
     envs = gym.vector.SyncVectorEnv(
         [
-            make_env(args.env_id, args.seed, i, args.capture_video, run_name)
+            make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.world_dir, args.config_path)
             for i in range(args.num_envs)
         ],
     )
