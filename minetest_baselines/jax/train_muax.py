@@ -1,13 +1,68 @@
+import argparse
+
 import jax
 
 import muax
 from muax import nn
 
+import gymnasium as gym
+import minetest_baselines.tasks  # noqa
+
+def parse_args(args=None):
+    parser = argparse.ArgumentParser()
+
+    # General arguments
+    parser.add_argument("--seed", type=int, default=1, help="seed of the experiment")
+
+    # Algorithm specific
+    parser.add_argument(
+        "--env-id",
+        type=str,
+        default="minetester-treechop_shaped-v0",
+        help="the id of the environment",
+    )
+    parser.add_argument(
+        "--episodes",
+        type=int,
+        default=1000,
+        help="total timesteps of the experiments",
+    )
+    parser.add_argument(
+        "--training-steps",
+        type=int,
+        default=10000,
+        help="total timesteps of the experiments",
+    )
+
+    if args is None:
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(args)
+    return args
 
 def train(args=None):
+    if args is None:
+        args = parse_args()
+    else:
+        args = parse_args(args)
+
+    # Set up minetest
+    env = gym.make(
+        args.env_id,
+        world_seed=args.seed,
+        start_xvfb=False,
+        headless=True,
+        env_port=5555,
+        server_port=30000,
+        x_display=4,
+    )
+
+    # Set up muax
     support_size = 10 
     embedding_size = 8
-    num_actions = 2
+    print(env.action_space.shape)
+    print(env.action_space)
+    num_actions = 36
     full_support_size = int(support_size * 2 + 1)
 
     repr_fn = nn._init_representation_func(nn.Representation, embedding_size)
@@ -24,9 +79,11 @@ def train(args=None):
                         optimizer=gradient_transform, support_size=support_size)
 
     print("Starting fit")
-    model_path = muax.fit(model, 'CartPole-v1', 
-                        max_episodes=1000,
-                        max_training_steps=10000,
+    model_path = muax.fit(model, 
+                        env=env,
+                        test_env=env,
+                        max_episodes=args.episodes,
+                        max_training_steps=args.training_steps,
                         tracer=tracer,
                         buffer=buffer,
                         k_steps=10,
