@@ -183,9 +183,9 @@ def make_env(env_id, seed, idx, capture_video, run_name):
             world_seed=seed,
             start_xvfb=False,
             headless=True,
-            env_port=5555 + idx,
-            server_port=30000 + idx,
-            x_display=4,
+            # env_port=5555 + idx,
+            # server_port=30000 + idx,
+            # x_display=4,
         )
         env = gym.wrappers.RecordEpisodeStatistics(env)
         # if capture_video:
@@ -311,7 +311,7 @@ def train(args=None):
     key, q_key = jax.random.split(key, 2)
 
     # env setup
-    xserver = start_xserver(4)
+    # xserver = start_xserver(4)
     envs = gym.vector.SyncVectorEnv(
         [
             make_env(args.env_id, args.seed, i, args.capture_video, run_name)
