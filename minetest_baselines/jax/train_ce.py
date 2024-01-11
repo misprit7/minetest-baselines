@@ -10,12 +10,14 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+import psutil
 
 import minetest_baselines.tasks
 
 HIDDEN_SIZE = 128
 BATCH_SIZE = 16
-PERCENTILE = 70
+PERCENTILE = 75
+NUM_ITERS = 5
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -42,7 +44,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--wandb-project-name",
         type=str,
-        default="minetest-baselines",
+        default="minetest-baselines-ce",
         help="the wandb's project name",
     )
     parser.add_argument(
@@ -62,7 +64,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--video-frequency",
         type=int,
-        default=100,
+        default=1,
         help="number of episodes between video recordings",
     )
     parser.add_argument(
@@ -132,16 +134,16 @@ def make_env(env_id, seed, idx, capture_video, video_frequency, run_name):
             start_xvfb=False,
             env_port=5555 + idx,
             server_port=30000 + idx,
+            render_mode="rgb_array",
         )
         if capture_video:
-            if idx == 0:
-                env = gym.wrappers.RecordVideo(
-                    env,
-                    f"videos/{run_name}",
-                    lambda x: x % video_frequency == 0,
-                    name_prefix=f"env-{idx}",
-                    disable_logger=True,
-                )
+            env = gym.wrappers.RecordVideo(
+                env,
+                f"videos/{run_name}",
+                lambda x: x % video_frequency == 0,
+                name_prefix=f"env-{idx}",
+                disable_logger=True,
+            )
         env.action_space.seed(seed + idx)
         env.observation_space.seed(seed + idx)
         return env
@@ -159,7 +161,8 @@ def iterate_batches(env, net, batch_size, key, params = None):
         netted = net.apply(params, obs_v)
         act_probs_v = nn.softmax(netted)
         act_probs = jnp.array(act_probs_v)[0]
-        action = int(jax.random.choice(key, len(act_probs), p=act_probs))
+        key, subkey = jax.random.split(key)
+        action = int(jax.random.choice(subkey, len(act_probs), p=act_probs))
         next_obs, reward, is_done, truncated, infos = env.step(np.array([action]))
         episode_reward += reward
         episode_steps.append(EpisodeStep(observation=obs, action=action))
@@ -172,7 +175,7 @@ def iterate_batches(env, net, batch_size, key, params = None):
             next_obs, _ = env.reset()
             print(len(batch))
             if len(batch) == batch_size:
-                yield batch
+                yield batch, key
                 batch = []
         obs = next_obs
 
@@ -228,6 +231,19 @@ def train(args = None):
         args = parse_args(args)
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
+    if args.track:
+        import wandb
+
+        wandb.init(
+            project=args.wandb_project_name,
+            entity=args.wandb_entity,
+            sync_tensorboard=True,
+            config=vars(args),
+            name=run_name,
+            monitor_gym=True,
+            save_code=True,
+        )
+
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -256,12 +272,13 @@ def train(args = None):
     obs, _ = envs.reset()
 
     ce_network = CENetwork(action_dim=envs.single_action_space.n)
+    print(envs.single_action_space.n)
     optimizer = optax.adam(0.001)
     # Initialize TrainState
     params = ce_network.init(key, jnp.array([obs[0]]))
     state = flax.training.train_state.TrainState.create(apply_fn=ce_network.apply, params=params, tx=optimizer)
 
-    for iter_no, batch in enumerate(iterate_batches(envs, ce_network, BATCH_SIZE, key, params=state.params)):
+    for iter_no, (batch, key) in enumerate(iterate_batches(envs, ce_network, BATCH_SIZE, key, params=state.params)):
         obs_v, acts_v, reward_b, reward_m = filter_batch(batch, PERCENTILE)
         obs_v = jnp.array([obs_v[0][0]])
         
@@ -270,6 +287,22 @@ def train(args = None):
         
         print("%d: loss=%.3f, reward_mean=%.1f, reward_bound=%.1f" % (
             iter_no, loss, reward_m, reward_b))
+
+        if args.track:
+            wandb.log({"loss": loss, "mean reward": reward_m})
+
+        if iter_no == NUM_ITERS:
+            break
+    
+    if args.track:
+        wandb.finish()
+
+    # Close training envs
+    envs.close()
+    # kill any remaining minetest processes
+    for proc in psutil.process_iter():
+        if proc.name() in ["minetest"]:
+            proc.kill()
 
 if __name__ == "__main__":
     train()
