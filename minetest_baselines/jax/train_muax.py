@@ -123,11 +123,16 @@ def train(args=None):
             world_seed=args.seed,
             start_xvfb=False,
             headless=True,
-            # env_port=5555,
-            # server_port=30000,
-            # x_display=4,
+            env_port=5555,
+            server_port=30000,
+            x_display=4,
+            render_mode="rgb_array",
         )
     )
+
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+
+
 
     # Not strictly neccessary, but it's a good canary to see if background unkilled minetest instances make this hang
     print("start")
@@ -156,7 +161,7 @@ def train(args=None):
 
     discount = 0.99
     tracer = muax.PNStep(10, discount, 0.5)
-    buffer = muax.TrajectoryReplayBuffer(5)
+    buffer = muax.TrajectoryReplayBuffer(500)
 
     gradient_transform = muax.model.optimizer(init_value=1e-3, peak_value=2e-3, end_value=1e-3, warmup_steps=5000, transition_steps=5000)
 
@@ -217,7 +222,6 @@ def train(args=None):
     # Params
     # Many of these would normally be passed to muax.fit
     random_seed = 0
-    buffer_warm_up = 1
     max_training_steps = args.training_steps
     num_simulations = 50
     k_steps = 10
@@ -231,6 +235,9 @@ def train(args=None):
     test_interval = 10
     num_test_episodes = 10
     test_env = env
+
+    buffer_warm_up = 128
+    # buffer_warm_up = 1
 
 
     # Setup
@@ -257,7 +264,7 @@ def train(args=None):
     print('buffer warm up stage...')
     while len(buffer) < buffer_warm_up:
         # print('buffer run')
-        print("new buffer warmup step")
+        print("new buffer warmup episode")
         obs, info = env.reset()    
         tracer.reset()
         trajectory = muax.Trajectory()
@@ -290,6 +297,7 @@ def train(args=None):
     # env = TrainMonitor(env, tensorboard_dir=os.path.join(tensorboard_dir, name), log_all_metrics=log_all_metrics)
     
     start_time = time.time()
+    global_step = 0
     for ep in range(max_episodes):
         print("New episode")
         obs, info = env.reset(seed=random_seed)   
@@ -297,7 +305,6 @@ def train(args=None):
         trajectory = muax.Trajectory()
         temperature = temperature_fn(max_training_steps=max_training_steps, training_steps=training_step)
         for t in range(env.spec.max_episode_steps):
-            global_step = ep * env.spec.max_episode_steps + t
             if t%30 == 0: print('train step')
             key, subkey = jax.random.split(key)
             a, pi, v = model.act(subkey, obs, 
@@ -315,23 +322,25 @@ def train(args=None):
                 trajectory.add(trans)
                 # env.record_metrics({'v': trans.v, 'Rn': trans.Rn})
                 writer.add_scalar(
-                    "losses/v",
+                    "v",
                     trans.v,
                     global_step
                 )
                 writer.add_scalar(
-                    "losses/Rn",
+                    "Rn",
                     trans.Rn,
                     global_step
                 )
                 writer.add_scalar(
-                    "charts/SPS",
+                    "SPS",
                     int(global_step / (time.time() - start_time)),
                     global_step,
                 )
             if done or truncated:
                 break 
             obs = obs_next 
+            global_step += 1
+
         trajectory.finalize()
         if len(trajectory) >= k_steps:
             buffer.add(trajectory, trajectory.batched_transitions.w.mean())
@@ -362,6 +371,11 @@ def train(args=None):
         # Periodically test the model
         if ep % test_interval == 0:
             test_G = muax.test(model, test_env, test_key, num_simulations=num_simulations, num_test_episodes=num_test_episodes)
+            writer.add_scalar(
+                "test_G",
+                test_G,
+                global_step
+            )
             # test_env.record_metrics({'test_G': test_G})
             # env.record_metrics({'test_G': test_G})
             if test_G >= best_test_G:
