@@ -16,6 +16,10 @@ import numpy as np
 import gymnasium as gym
 import minetest_baselines.tasks  # noqa
 
+# Debugging imports
+import minetest_baselines.utils.test_envs
+import minetest_baselines.utils.logging as logger
+
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
 
@@ -370,7 +374,7 @@ def train(args=None):
   
         # Periodically test the model
         if ep % test_interval == 0:
-            test_G = muax.test(model, test_env, test_key, num_simulations=num_simulations, num_test_episodes=num_test_episodes)
+            test_G = muax.test.test(model, test_env, test_key, num_simulations=num_simulations, num_test_episodes=num_test_episodes)
             writer.add_scalar(
                 "test_G",
                 test_G,
