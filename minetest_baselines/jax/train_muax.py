@@ -267,14 +267,13 @@ def train(args=None):
 
     print('buffer warm up stage...')
     while len(buffer) < buffer_warm_up:
-        # print('buffer run')
-        print("new buffer warmup episode")
+        print(f"New buffer warmup episode: {len(buffer)}")
         obs, info = env.reset()    
         tracer.reset()
         trajectory = muax.Trajectory()
         temperature = temperature_fn(max_training_steps=max_training_steps, training_steps=training_step)
         for t in range(env.spec.max_episode_steps):
-            if t%30 == 0: print('buffer step')
+            # if t%30 == 0: print('buffer step')
             key, subkey = jax.random.split(key)
             a, pi, v = model.act(subkey, obs, 
                            with_pi=True, 
@@ -297,7 +296,7 @@ def train(args=None):
           buffer.add(trajectory, trajectory.batched_transitions.w.mean())
 
 
-    print('start training...')
+    print('Start training...')
     # env = TrainMonitor(env, tensorboard_dir=os.path.join(tensorboard_dir, name), log_all_metrics=log_all_metrics)
     
     start_time = time.time()
@@ -310,6 +309,7 @@ def train(args=None):
         temperature = temperature_fn(max_training_steps=max_training_steps, training_steps=training_step)
         for t in range(env.spec.max_episode_steps):
             # if t%30 == 0: print('train step')
+            print("New step")
             key, subkey = jax.random.split(key)
             a, pi, v = model.act(subkey, obs, 
                                  with_pi=True, 
@@ -340,6 +340,10 @@ def train(args=None):
                     int(global_step / (time.time() - start_time)),
                     global_step,
                 )
+                print(a)
+                print(r)
+                print(trans.v)
+                print(trans.Rn)
             if done or truncated:
                 break 
             obs = obs_next 
