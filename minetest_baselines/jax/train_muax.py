@@ -16,6 +16,8 @@ import numpy as np
 import gymnasium as gym
 import minetest_baselines.tasks  # noqa
 
+from minetester.utils import start_xserver
+
 # Debugging imports
 import minetest_baselines.utils.test_envs
 import minetest_baselines.utils.logging as logger
@@ -121,15 +123,16 @@ def train(args=None):
         args = parse_args(args)
 
     # Set up minetest
+    #start_xserver(4)
     env = LazyWrapper(
         gym.make(
             args.env_id,
             world_seed=args.seed,
-            start_xvfb=False,
+            start_xvfb=True,
             headless=True,
             env_port=5555,
             server_port=30000,
-            x_display=4,
+            #x_display=4,
             render_mode="rgb_array",
         )
     )
