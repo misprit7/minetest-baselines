@@ -16,6 +16,10 @@ import numpy as np
 import gymnasium as gym
 import minetest_baselines.tasks  # noqa
 
+# Debugging imports
+import minetest_baselines.utils.test_envs
+import minetest_baselines.utils.logging as logger
+
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
 
