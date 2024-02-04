@@ -182,7 +182,7 @@ def train(args=None):
         env = gym.wrappers.RecordVideo(
             env,
             f"videos/{run_name}",
-            lambda x: x % 100 == 0,
+            lambda x: x % 200 == 0,
         )
 
 
@@ -243,7 +243,7 @@ def train(args=None):
     num_test_episodes = 10
     test_env = env
 
-    buffer_warm_up = 128
+    buffer_warm_up = 32
     # buffer_warm_up = 1
 
 
@@ -306,13 +306,13 @@ def train(args=None):
     start_time = time.time()
     global_step = 0
     for ep in range(max_episodes):
-        print("New episode")
+        print(f"New episode: {ep}")
         obs, info = env.reset(seed=random_seed)   
         tracer.reset() 
         trajectory = muax.Trajectory()
         temperature = temperature_fn(max_training_steps=max_training_steps, training_steps=training_step)
         for t in range(env.spec.max_episode_steps):
-            if t%30 == 0: print('train step')
+            # if t%30 == 0: print('train step')
             key, subkey = jax.random.split(key)
             a, pi, v = model.act(subkey, obs, 
                                  with_pi=True, 
@@ -372,7 +372,7 @@ def train(args=None):
             if not model_path:
                 model_path = cur_path
         if training_step >= max_training_steps:
-            return model_path
+            print("Finishing due to training steps")
         # env.record_metrics({'training_step': training_step})
   
         # Periodically test the model
@@ -394,6 +394,7 @@ def train(args=None):
                 model.save(model_path)
 
 
+    print(model_path)
     writer.close()
     print("Finished fit")
 
