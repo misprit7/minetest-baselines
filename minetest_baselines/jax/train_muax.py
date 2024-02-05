@@ -16,6 +16,8 @@ import numpy as np
 import gymnasium as gym
 import minetest_baselines.tasks  # noqa
 
+from minetester.utils import start_xserver
+
 # Debugging imports
 import minetest_baselines.utils.test_envs
 import minetest_baselines.utils.logging as logger
@@ -67,11 +69,12 @@ def parse_args(args=None):
         default="minetester-treechop_shaped-v0",
         help="the id of the environment",
     )
+    # I don't like how this these both specify basically the same thing, max_episodes = training_steps * num_update_per_episode
     parser.add_argument(
-        "--episodes",
+        "--max-episodes",
         type=int,
         default=1000,
-        help="total timesteps of the experiments",
+        help="total episodes of the experiments",
     )
     parser.add_argument(
         "--training-steps",
@@ -121,15 +124,17 @@ def train(args=None):
         args = parse_args(args)
 
     # Set up minetest
+    #start_xserver(4)
     env = LazyWrapper(
         gym.make(
             args.env_id,
             world_seed=args.seed,
-            start_xvfb=False,
+            start_xvfb=True,
+            # start_xvfb=False,
             headless=True,
             env_port=5555,
             server_port=30000,
-            x_display=4,
+            #x_display=4,
             render_mode="rgb_array",
         )
     )
@@ -179,7 +184,7 @@ def train(args=None):
         env = gym.wrappers.RecordVideo(
             env,
             f"videos/{run_name}",
-            lambda x: x % 100 == 0,
+            lambda x: x % 200 == 0,
         )
 
 
@@ -206,7 +211,7 @@ def train(args=None):
     # model_path = muax.fit(model, 
     #                     env=env,
     #                     test_env=env,
-    #                     max_episodes=args.episodes,
+    #                     max_episodes=args.max_episodes,
     #                     max_training_steps=args.training_steps,
     #                     tracer=tracer,
     #                     buffer=buffer,
@@ -229,19 +234,19 @@ def train(args=None):
     max_training_steps = args.training_steps
     num_simulations = 50
     k_steps = 10
-    max_episodes = args.episodes
+    max_episodes = args.max_episodes
     num_update_per_episode = 50
     num_trajectory = 32
     sample_per_trajectory = 1
-    save_every_n_epochs = 1
+    save_every_n_epochs = 50
     model_save_path = None
     save_name = None
     test_interval = 10
     num_test_episodes = 10
     test_env = env
 
-    buffer_warm_up = 128
-    # buffer_warm_up = 1
+    # buffer_warm_up = 32
+    buffer_warm_up = 1
 
 
     # Setup
@@ -267,14 +272,13 @@ def train(args=None):
 
     print('buffer warm up stage...')
     while len(buffer) < buffer_warm_up:
-        # print('buffer run')
-        print("new buffer warmup episode")
+        print(f"New buffer warmup episode: {len(buffer)}")
         obs, info = env.reset()    
         tracer.reset()
         trajectory = muax.Trajectory()
         temperature = temperature_fn(max_training_steps=max_training_steps, training_steps=training_step)
         for t in range(env.spec.max_episode_steps):
-            if t%30 == 0: print('buffer step')
+            # if t%30 == 0: print('buffer step')
             key, subkey = jax.random.split(key)
             a, pi, v = model.act(subkey, obs, 
                            with_pi=True, 
@@ -297,19 +301,26 @@ def train(args=None):
           buffer.add(trajectory, trajectory.batched_transitions.w.mean())
 
 
-    print('start training...')
+    print('Start training...')
     # env = TrainMonitor(env, tensorboard_dir=os.path.join(tensorboard_dir, name), log_all_metrics=log_all_metrics)
     
     start_time = time.time()
     global_step = 0
     for ep in range(max_episodes):
-        print("New episode")
+        print(f"New episode: {ep}")
         obs, info = env.reset(seed=random_seed)   
         tracer.reset() 
         trajectory = muax.Trajectory()
         temperature = temperature_fn(max_training_steps=max_training_steps, training_steps=training_step)
+
+        # Logging metrics
+        total_r = 0
+        local_step = 0
+        action_log = np.zeros(num_actions)
+
+        t_stepping_start = time.time()
         for t in range(env.spec.max_episode_steps):
-            if t%30 == 0: print('train step')
+            # if t%30 == 0: print('train step')
             key, subkey = jax.random.split(key)
             a, pi, v = model.act(subkey, obs, 
                                  with_pi=True, 
@@ -318,6 +329,11 @@ def train(args=None):
                                  num_simulations=num_simulations,
                                  temperature=temperature)
             obs_next, r, done, truncated, info = env.step(a)
+
+            # Update logging metrics
+            total_r += r
+            action_log[a] += 1
+
   #           if truncated:
   #             r = 1 / (1 - tracer.gamma)
             tracer.add(obs, a, r, done or truncated, v=v, pi=pi)
@@ -344,12 +360,19 @@ def train(args=None):
                 break 
             obs = obs_next 
             global_step += 1
+            local_step += 1
+        print(f"Time stepping: {time.time() - t_stepping_start}")
+
+        writer.add_scalar("mean_r", total_r / local_step, global_step);
+        writer.add_scalar("episode", ep, global_step);
+        writer.add_histogram("actions", action_log / local_step, global_step)
 
         trajectory.finalize()
         if len(trajectory) >= k_steps:
             buffer.add(trajectory, trajectory.batched_transitions.w.mean())
   
         train_loss = 0
+        t_training_start = time.time()
         for _ in range(num_update_per_episode):
             transition_batch = buffer.sample(num_trajectory=num_trajectory,
                                               sample_per_trajectory=sample_per_trajectory,
@@ -357,10 +380,12 @@ def train(args=None):
             loss_metric = model.update(transition_batch)
             train_loss += loss_metric['loss']
             training_step += 1
+        print(f"Time training: {time.time() - t_training_start}")
 
         train_loss /= num_update_per_episode
-        # env.record_metrics({'loss': train_loss})
-        if ep % save_every_n_epochs == 0:
+        writer.add_scalar("train_loss", train_loss, training_step);
+
+        if ep % save_every_n_epochs == 0 and ep > 0:
             model_folder_name = f'epoch_{ep:04d}_loss_{train_loss:.8f}'
             if not os.path.exists(os.path.join(model_dir, model_folder_name)):
                 os.makedirs(os.path.join(model_dir, model_folder_name))
@@ -369,19 +394,13 @@ def train(args=None):
             if not model_path:
                 model_path = cur_path
         if training_step >= max_training_steps:
-            return model_path
-        # env.record_metrics({'training_step': training_step})
+            print("Finishing due to training steps")
+            break
   
         # Periodically test the model
         if ep % test_interval == 0:
             test_G = muax.test.test(model, test_env, test_key, num_simulations=num_simulations, num_test_episodes=num_test_episodes)
-            writer.add_scalar(
-                "test_G",
-                test_G,
-                global_step
-            )
-            # test_env.record_metrics({'test_G': test_G})
-            # env.record_metrics({'test_G': test_G})
+            writer.add_scalar("test_G", test_G, global_step)
             if test_G >= best_test_G:
                 best_test_G = test_G
                 model_folder_name = f'epoch_{ep:04d}_test_G_{test_G:.8f}'
@@ -391,6 +410,7 @@ def train(args=None):
                 model.save(model_path)
 
 
+    print(model_path)
     writer.close()
     print("Finished fit")
 
