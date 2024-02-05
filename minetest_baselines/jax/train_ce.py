@@ -129,7 +129,7 @@ def make_env(env_id, seed, idx, capture_video, video_frequency, run_name):
             env_id,
             base_seed=seed + idx,
             headless=True,
-            start_xvfb=False,
+            start_xvfb=True,
             env_port=5555 + idx,
             server_port=30000 + idx,
         )
@@ -233,6 +233,8 @@ def train(args = None):
     np.random.seed(args.seed)
     key = jax.random.PRNGKey(args.seed)
 
+    print("I'm about to make the environment :)")
+
     # env setup
     envs = gym.vector.SyncVectorEnv(
         [
@@ -248,12 +250,16 @@ def train(args = None):
         ],
     )
 
+    print("I made the environment woohoo!")
+
     assert isinstance(
         envs.single_action_space,
         gym.spaces.Discrete,
     ), "only discrete action space is supported"
 
     obs, _ = envs.reset()
+
+    print("I reseted the environment yipee!")
 
     ce_network = CENetwork(action_dim=envs.single_action_space.n)
     optimizer = optax.adam(0.001)
