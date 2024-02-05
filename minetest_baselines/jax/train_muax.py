@@ -152,7 +152,8 @@ def train(args=None):
     # Set up muax
 
     # Action space size
-    num_actions = 36
+    num_actions = env.action_space.n
+    print(f"Number of actions: {num_actions}")
     # Something to do with the range of possible rewards? Not 100% sure
     support_size = 10
 
@@ -244,7 +245,6 @@ def train(args=None):
     test_interval = 10
     num_test_episodes = 10
     test_env = env
-
     # buffer_warm_up = 32
     buffer_warm_up = 1
 
@@ -287,6 +287,7 @@ def train(args=None):
                            num_simulations=num_simulations,
                            temperature=temperature)
             obs_next, r, done, truncated, info = env.step(a)
+            print(f"Value?: {v}, reward: {r}")
             #       if truncated:
             #         r = 1 / (1 - tracer.gamma)
             tracer.add(obs, a, r, done or truncated, v=v, pi=pi)
@@ -329,11 +330,9 @@ def train(args=None):
                                  num_simulations=num_simulations,
                                  temperature=temperature)
             obs_next, r, done, truncated, info = env.step(a)
-
             # Update logging metrics
             total_r += r
             action_log[a] += 1
-
   #           if truncated:
   #             r = 1 / (1 - tracer.gamma)
             tracer.add(obs, a, r, done or truncated, v=v, pi=pi)
@@ -367,6 +366,9 @@ def train(args=None):
         writer.add_scalar("episode", ep, global_step);
         writer.add_histogram("actions", action_log / local_step, global_step)
 
+        print(total_r)
+        if args.track:
+            wandb.log({"total episode reward": total_r})
         trajectory.finalize()
         if len(trajectory) >= k_steps:
             buffer.add(trajectory, trajectory.batched_transitions.w.mean())
@@ -374,6 +376,7 @@ def train(args=None):
         train_loss = 0
         t_training_start = time.time()
         for _ in range(num_update_per_episode):
+            print(_)
             transition_batch = buffer.sample(num_trajectory=num_trajectory,
                                               sample_per_trajectory=sample_per_trajectory,
                                               k_steps=k_steps)
@@ -381,6 +384,8 @@ def train(args=None):
             train_loss += loss_metric['loss']
             training_step += 1
         print(f"Time training: {time.time() - t_training_start}")
+
+        print("model updated")
 
         train_loss /= num_update_per_episode
         writer.add_scalar("train_loss", train_loss, training_step);
