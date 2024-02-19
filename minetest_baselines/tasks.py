@@ -5,7 +5,7 @@ from minetester.minetest_env import Minetest
 from minetest_baselines.wrappers import (
     AlwaysDig,
     DictToMultiDiscreteActions,
-    DiscreteMouseAction,
+    DiscreteMouseAndCraftingAction,
     FlattenMultiDiscreteActions,
     PenalizeJumping,
     SelectKeyActions,
@@ -18,7 +18,7 @@ def wrapped_treechop_env(**kwargs):
     )
     env = TimeLimit(env, 500)
     # action space wrappers
-    env = DiscreteMouseAction(
+    env = DiscreteMouseAndCraftingAction(
         env,
         num_mouse_bins=3,
         max_mouse_move=25,

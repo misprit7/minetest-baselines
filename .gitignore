@@ -4,6 +4,7 @@ events.out.*
 videos/*
 wandb/*
 runs
+artefacts
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

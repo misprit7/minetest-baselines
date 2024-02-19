@@ -125,12 +125,13 @@ class SelectKeyActions(MinetestWrapper):
     ):
         super().__init__(env)
         for key in select_keys:
-            assert key in KEY_MAP, f"Selected key '{key}' is not supported."
+            assert key in NOOP_ACTION, f"Selected key '{key}' is not supported."
         self.selected_keys = select_keys
         self.action_space = gym.spaces.Dict(
             {
                 **{key: gym.spaces.Discrete(2) for key in self.selected_keys},
                 **{"MOUSE": self.env.action_space["MOUSE"]},
+                **{"CRAFT": self.env.action_space["CRAFT"]},
             },
         )
 
@@ -140,7 +141,7 @@ class SelectKeyActions(MinetestWrapper):
         return self.env.step(full_action)
 
 
-class DiscreteMouseAction(MinetestWrapper):
+class DiscreteMouseAndCraftingAction(MinetestWrapper):
     def __init__(
         self,
         env: gym.Env,
@@ -148,6 +149,7 @@ class DiscreteMouseAction(MinetestWrapper):
         max_mouse_move: int = 50,
         quantization_scheme: str = "linear",
         mu: float = 5.0,
+        num_craftable_items: int = 100,
     ):
         super().__init__(env)
         self.max_mouse_move = max_mouse_move
@@ -156,8 +158,10 @@ class DiscreteMouseAction(MinetestWrapper):
         self.bin_size = 2 * self.max_mouse_move / (self.num_mouse_bins - 1)
         self.quantization_scheme = quantization_scheme
         self.mu = mu
+        self.num_craftable_items = num_craftable_items
 
         self.mouse_action_space = gym.spaces.Discrete(self.num_mouse_actions)
+        self.craft_action_space = gym.spaces.Discrete(self.num_craftable_items)
 
         # print(self.env.action_space)
         # print()
@@ -173,6 +177,7 @@ class DiscreteMouseAction(MinetestWrapper):
                     if key != "MOUSE"
                 },
                 **{"MOUSE": self.mouse_action_space},
+                **{"CRAFT": self.craft_action_space},
             },
         )
 
@@ -202,6 +207,7 @@ class DiscreteMouseAction(MinetestWrapper):
         return xy
 
     def step(self, action):
+    	# mouse actions
         mouse_action = action["MOUSE"]
         if not isinstance(mouse_action, np.ndarray):
             mouse_action = np.ndarray(mouse_action)
@@ -212,19 +218,28 @@ class DiscreteMouseAction(MinetestWrapper):
         )
         undisc_mouse_action = self.undiscretize(xy_action)
         action["MOUSE"] = undisc_mouse_action.astype(int)
+        # crafting actions
+        craft_action = action["CRAFT"]
+        if not isinstance(craft_action, np.ndarray):
+            craft_action = np.ndarray(craft_action)
+        if craft_action.shape == ():
+            craft_action = craft_action[None]
+        craft_index = craft_action[0]
+        action["CRAFT"] = craft_index.astype(int)
         return self.env.step(action)
 
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
-    env = Minetest(seed=1)
+    env = Minetest(minetest_root="../minetest", world_dir="../minetest/worlds/test")
 
-    env = DiscreteMouseAction(
+    env = DiscreteMouseAndCraftingAction(
         env,
         num_mouse_bins=5,
         max_mouse_move=50,
         quantization_scheme="linear",
+        num_craftable_items=107,
     )
     # Visualize the discretization of mouse actions
     x = np.linspace(-80, 80, 1000)  # in pixels
@@ -243,7 +258,7 @@ if __name__ == "__main__":
     # Only use a subset of the available keys
     env = SelectKeyActions(
         env,
-        select_keys={"FORWARD", "BACKWARD", "LEFT", "RIGHT", "JUMP", "DIG"},
+        select_keys={"FORWARD", "BACKWARD", "LEFT", "RIGHT", "JUMP", "DIG", "CRAFT"},
     )
     # Combine mutually exclusive actions into key groups
     env = GroupKeyActions(env, groups=[{"FORWARD", "BACKWARD"}, {"LEFT", "RIGHT"}])
