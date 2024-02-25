@@ -129,8 +129,8 @@ def train(args=None):
         gym.make(
             args.env_id,
             world_seed=args.seed,
-            start_xvfb=True,
-            # start_xvfb=False,
+            # start_xvfb=True,
+            start_xvfb=False,
             headless=True,
             env_port=5555,
             server_port=30000,
@@ -287,7 +287,7 @@ def train(args=None):
                            num_simulations=num_simulations,
                            temperature=temperature)
             obs_next, r, done, truncated, info = env.step(a)
-            print(f"Value?: {v}, reward: {r}")
+            # print(f"Value: {v}, reward: {r}")
             #       if truncated:
             #         r = 1 / (1 - tracer.gamma)
             tracer.add(obs, a, r, done or truncated, v=v, pi=pi)
@@ -317,7 +317,8 @@ def train(args=None):
         # Logging metrics
         total_r = 0
         local_step = 0
-        action_log = np.zeros(num_actions)
+        action_log = []
+        action_count = np.zeros(num_actions)
 
         t_stepping_start = time.time()
         for t in range(env.spec.max_episode_steps):
@@ -332,7 +333,8 @@ def train(args=None):
             obs_next, r, done, truncated, info = env.step(a)
             # Update logging metrics
             total_r += r
-            action_log[a] += 1
+            action_count[a] += 1
+            action_log += [a]
   #           if truncated:
   #             r = 1 / (1 - tracer.gamma)
             tracer.add(obs, a, r, done or truncated, v=v, pi=pi)
@@ -361,10 +363,11 @@ def train(args=None):
             global_step += 1
             local_step += 1
         print(f"Time stepping: {time.time() - t_stepping_start}")
+        print("Action counts: ", action_count)
 
         writer.add_scalar("mean_r", total_r / local_step, global_step);
         writer.add_scalar("episode", ep, global_step);
-        writer.add_histogram("actions", action_log / local_step, global_step)
+        writer.add_histogram("actions", np.array(action_log), global_step)
 
         print(total_r)
         if args.track:
@@ -376,7 +379,6 @@ def train(args=None):
         train_loss = 0
         t_training_start = time.time()
         for _ in range(num_update_per_episode):
-            print(_)
             transition_batch = buffer.sample(num_trajectory=num_trajectory,
                                               sample_per_trajectory=sample_per_trajectory,
                                               k_steps=k_steps)
@@ -403,6 +405,7 @@ def train(args=None):
             break
   
         # Periodically test the model
+        t_testing_start = time.time()
         if ep % test_interval == 0:
             test_G = muax.test.test(model, test_env, test_key, num_simulations=num_simulations, num_test_episodes=num_test_episodes)
             writer.add_scalar("test_G", test_G, global_step)
@@ -413,6 +416,7 @@ def train(args=None):
                   os.makedirs(os.path.join(model_dir, model_folder_name))
                 model_path = os.path.join(model_dir, model_folder_name, save_name)
                 model.save(model_path)
+        print(f"Time testing: {time.time() - t_testing_start}")
 
 
     print(model_path)
