@@ -74,6 +74,14 @@ def parse_args(args=None):
         default=1,
         help="the number of environments to sample from",
     )
+    parser.add_argument(
+        "--headless",
+        type=lambda x: bool(strtobool(x)),
+        default=False,
+        nargs="?",
+        const=True,
+        help="whether minetest is executing on a headless machine",
+    )
 
     # Algorithm specific
     parser.add_argument(
@@ -146,13 +154,12 @@ def temperature_fn(max_epochs, training_epochs):
 # This is similar to dqn, not entirely sure but I think this awkward helper function
 # is to prevent a lambda from capturing an indexing variables whne making the 
 # SyncVectorEnv
-def make_env(env_id, seed, idx, capture_video, run_name):
+def make_env(env_id, seed, idx, capture_video, run_name, headless=False):
     def thunk():
         env = gym.make(
             env_id,
             world_seed=seed,
-            # start_xvfb=True, #True for remote, false for local
-            start_xvfb=False,
+            start_xvfb=headless, #True for remote, false for local
             headless=True,
             env_port=5555+idx,
             server_port=30000+idx,
@@ -215,9 +222,10 @@ def train(args=None):
 
 
     # Set up minetest
-    #start_xserver(4)
-    envs = gym.vector.SyncVectorEnv([
-        make_env(args.env_id, args.seed, i, args.capture_video, run_name)
+    if args.headless:
+        start_xserver(4)
+    envs = gym.vector.AsyncVectorEnv([
+        make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.headless)
         for i in range(args.num_envs)
     ])
 
