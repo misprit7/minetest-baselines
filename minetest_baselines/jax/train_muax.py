@@ -154,8 +154,8 @@ def make_env(env_id, seed, idx, capture_video, run_name):
             # start_xvfb=True, #True for remote, false for local
             start_xvfb=False,
             headless=True,
-            # env_port=5555+idx,
-            # server_port=30000+idx,
+            env_port=5555+idx,
+            server_port=30000+idx,
             #x_display=4,
             render_mode="rgb_array",
         )
@@ -176,6 +176,31 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 
     return thunk
 
+# Test function, taken from Muax and modified for sync vector
+# For simplicity also changed so that each test is run on num_envs episodes
+def test(model, envs, key, num_simulations, max_env_steps, random_seed=None):
+    num_envs = len(envs.envs)
+    total_reward = np.zeros(num_envs)
+
+    obs, info = envs.reset(seed=random_seed)
+    for t in range(max_env_steps):
+        key, subkey = jax.random.split(key)
+        a = model.act(subkey, obs, 
+                      with_pi=False, 
+                      with_value=False, 
+                      obs_from_batch=True,
+                      num_simulations=num_simulations,
+                      temperature=0.) # Use deterministic actions during testing
+        obs_next, r, done, truncated, info = envs.step(a)
+        total_reward += r
+        if done.any() or truncated.any():
+            # TODO: If we ever get good enough to finish runs before max_env_steps we should be smarter about this
+            break 
+        obs = obs_next 
+        
+    average_test_reward = np.mean(total_reward)
+    return average_test_reward
+
 
 ###############################################################################
 # Main Training Loop
@@ -186,10 +211,13 @@ def train(args=None):
     else:
         args = parse_args(args)
 
+    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+
+
     # Set up minetest
     #start_xserver(4)
     envs = gym.vector.SyncVectorEnv([
-        make_env(args.env_id, args.seed, i, args.capture_video, args.run_name)
+        make_env(args.env_id, args.seed, i, args.capture_video, run_name)
         for i in range(args.num_envs)
     ])
 
@@ -231,9 +259,9 @@ def train(args=None):
     model = muax.MuZero(repr_fn, pred_fn, dy_fn, policy='muzero', discount=discount,
                         optimizer=gradient_transform, support_size=support_size)
 
-    # Set up logging
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-
+    ###########################################################################
+    # Logging Set Up
+    ###########################################################################
     if args.track:
         import wandb
 
@@ -286,8 +314,6 @@ def train(args=None):
     num_simulations = 50
     k_steps = 10
     max_epochs = args.max_epochs
-    num_update_per_epoch = args.updates_per_epoch
-    episodes_per_epoch = args.steps_per_epoch
     num_trajectory = 32
     sample_per_trajectory = 1
     save_every_n_epochs = 50
@@ -298,7 +324,11 @@ def train(args=None):
     test_env = envs
     # buffer_warm_up = 32
     buffer_warm_up = 1
-    max_env_steps = 10000 # Max env steps per epoch before cutting off, shouldn't be hit
+
+    num_update_per_epoch = args.updates_per_epoch
+    episodes_per_epoch = args.episodes_per_epoch
+    # max_env_steps = 500 # Steps per episode
+    max_env_steps = 50 # Steps per episode
 
 
     ###########################################################################
@@ -353,18 +383,23 @@ def train(args=None):
                     trajectory.add(trans)
                 if done[i] or truncated[i]:
                     # Note: sync vector is automatically reset, so no need to do it manually
-                    trajectory.finalize()
-                    if len(trajectories) >= k_steps:
-                        buffer.add(trajectories, trajectory.batched_transitions.w.mean())
+                    if len(trajectory) >= k_steps:
+                        trajectory.finalize()
+                        buffer.add(trajectory, trajectory.batched_transitions.w.mean())
+                    trajectories[i] = muax.Trajectory()
                     episodes_finished += 1
-
+                    print('finished early:', t)
 
             if episodes_finished >= episodes_per_epoch:
                 break;
 
             obs = obs_next 
-            if t == max_env_steps-1:
-                print("Max steps reached!")
+        for trajectory in trajectories:
+            print(len(trajectory))
+            if len(trajectory) >= k_steps:
+                trajectory.finalize()
+                buffer.add(trajectory, trajectory.batched_transitions.w.mean())
+            episodes_finished += 1
 
 
     ###########################################################################
@@ -419,8 +454,6 @@ def train(args=None):
                 while tracer:
                     trans = tracer.pop()
                     trajectory.add(trans)
-                    trans = tracer.pop()
-                    trajectories.add(trans)
                     # env.record_metrics({'v': trans.v, 'Rn': trans.Rn})
                     # writer.add_scalar(
                     #     "v",
@@ -434,9 +467,9 @@ def train(args=None):
                     # )
                 if done[i] or truncated[i]:
                     # Note: sync vector is automatically reset, so no need to do it manually
-                    trajectory.finalize()
-                    if len(trajectories) >= k_steps:
-                        buffer.add(trajectories, trajectory.batched_transitions.w.mean())
+                    if len(trajectory) >= k_steps:
+                        trajectory.finalize()
+                        buffer.add(trajectory, trajectory.batched_transitions.w.mean())
                     episodes_finished += 1
 
 
@@ -444,6 +477,12 @@ def train(args=None):
             if episodes_finished >= episodes_per_epoch:
                 break;
             obs = obs_next 
+
+        for trajectory in trajectories:
+            if len(trajectory) >= k_steps:
+                trajectory.finalize()
+                buffer.add(trajectory, trajectory.batched_transitions.w.mean())
+            episodes_finished += 1
 
         #######################################################################
         # Training
@@ -457,7 +496,6 @@ def train(args=None):
         writer.add_scalar("SPS", int(global_step / (time.time() - start_time)), global_step)
         writer.add_histogram("actions", np.array(action_log), global_step)
 
-        print(total_r)
         if args.track:
             wandb.log({"total episode reward": total_r})
         train_loss = 0
@@ -492,7 +530,7 @@ def train(args=None):
         #######################################################################
         t_testing_start = time.time()
         if ep % test_interval == 0:
-            test_G = muax.test.test(model, test_env, test_key, num_simulations=num_simulations, num_test_episodes=num_test_episodes)
+            test_G = test(model, test_env, test_key, num_simulations=num_simulations, max_env_steps=max_env_steps)
             writer.add_scalar("test_G", test_G, global_step)
             if test_G >= best_test_G:
                 best_test_G = test_G
