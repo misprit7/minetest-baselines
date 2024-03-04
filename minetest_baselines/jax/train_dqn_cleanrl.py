@@ -21,7 +21,7 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from tensorboardX import SummaryWriter
 
 import minetest_baselines.tasks  # noqa
-
+import subprocess
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser()
@@ -325,11 +325,13 @@ def train(args=None):
     key = jax.random.PRNGKey(args.seed)
     key, q_key = jax.random.split(key, 2)
 
+    subprocess.call("./worlds/CopyWorld.sh")
+
     # env setup
     xserver = start_xserver(4)
     envs = gym.vector.SyncVectorEnv(
         [
-            make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.world_dir, args.config_path)
+            make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.world_dir + '/' + str(i), args.config_path)
             for i in range(args.num_envs)
         ],
     )
@@ -510,6 +512,10 @@ def train(args=None):
 
     # Close training envs
     envs.close()
+
+    # Cleans the worlds after done running each one
+    subprocess.call("./worlds/CleanWorlds.sh")
+
     # kill any remaining minetest processes
     for proc in psutil.process_iter():
         if proc.name() in ["minetest"]:

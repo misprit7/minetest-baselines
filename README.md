@@ -40,9 +40,9 @@ Create a corresponding minetest.conf file containing a single line
 ```
 static_spawnpoint = (<x>,<y>,<z>)
 ```
-Then, add the following arguments to the training command:
+Then, add the following arguments to the training command (assuming you're running from the minetest-baselines path), otherwise /worlds/ToCopy should the relative path to the /worlds folder followed by /ToCopy:
 ```
---world-dir [WORLD_PATH] --config-path [CONFIG_FILE_PATH]
+--world-dir /worlds/ToCopy --config-path [CONFIG_FILE_PATH]
 ```
 
 ## Contributing
