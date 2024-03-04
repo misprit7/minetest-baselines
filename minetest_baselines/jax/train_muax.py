@@ -3,6 +3,7 @@ import argparse
 import os
 import time
 from distutils.util import strtobool
+import warnings
 
 import jax
 from jax import numpy as jnp
@@ -151,6 +152,10 @@ def temperature_fn(max_epochs, training_epochs):
   else:
       return 0.25
 
+def suppress_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning, message=".*obs returned by the `.+\(\)` method was expecting a numpy array.*")
+    warnings.filterwarnings("ignore", category=UserWarning, message=".*Casting input x to numpy array.*")
+
 # This is similar to dqn, not entirely sure but I think this awkward helper function
 # is to prevent a lambda from capturing an indexing variables whne making the 
 # SyncVectorEnv
@@ -160,7 +165,7 @@ def make_env(env_id, seed, idx, capture_video, run_name, headless=False):
             env_id,
             world_seed=seed,
             start_xvfb=headless, #True for remote, false for local
-            headless=True,
+            headless=False,
             env_port=5555+idx,
             server_port=30000+idx,
             #x_display=4,
@@ -217,6 +222,8 @@ def train(args=None):
         args = parse_args()
     else:
         args = parse_args(args)
+
+    suppress_warnings()
 
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
@@ -554,3 +561,24 @@ def train(args=None):
     writer.close()
     print("Finished fit")
 
+if __name__ == '__main__':
+    suppress_warnings()
+    args = parse_args()
+    start_xserver(0)
+    print("Starting, num envs:", args.num_envs)
+    envs = gym.vector.AsyncVectorEnv([
+        make_env(args.env_id, args.seed, i, False, 'test', False)# False if i>0 else args.headless)
+        for i in range(args.num_envs)
+    ])
+
+    print("Start envs sanity check")
+    obs, _ = envs.reset()
+    print(type(obs))
+    print("envs working")
+
+    num_steps = int(5000 / args.num_envs)
+    t_start = time.time()
+    for i in range(num_steps):
+        print('Steps per second: ', i*args.num_envs/(time.time()-t_start))
+        obs, _, _, _, _ = envs.step([4]*args.num_envs)
+        if i%50 == 0: envs.reset()
