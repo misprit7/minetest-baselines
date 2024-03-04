@@ -6,7 +6,7 @@ from minetest_baselines.algos import ALGOS
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Training script", add_help=False)
 
-    parser.add_argument("--algo", type=str, default="ppo", help="Name of the algorithm")
+    parser.add_argument("--algo", type=str, default="muax", help="Name of the algorithm")
 
     parser.add_argument(
         "--task",

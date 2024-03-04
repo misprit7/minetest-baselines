@@ -178,7 +178,7 @@ def make_env(env_id, seed, idx, capture_video, run_name, headless=False):
             env = gym.wrappers.RecordVideo(
                 env,
                 f"videos/{run_name}",
-                lambda x: x % 200 == 0,
+                lambda x: x % 100 == 0,
             )
 
 
@@ -191,7 +191,7 @@ def make_env(env_id, seed, idx, capture_video, run_name, headless=False):
 # Test function, taken from Muax and modified for sync vector
 # For simplicity also changed so that each test is run on num_envs episodes
 def test(model, envs, key, num_simulations, max_env_steps, random_seed=None):
-    num_envs = len(envs.envs)
+    num_envs = 1#len(envs.envs)
     total_reward = np.zeros(num_envs)
 
     obs, info = envs.reset(seed=random_seed)
@@ -239,6 +239,8 @@ def train(args=None):
     # Not strictly neccessary, but it's a good canary to see if background unkilled minetest instances make this hang
     print("Start envs sanity check")
     obs, _ = envs.reset()
+    print("Envs reset")
+    test_obs = obs[0]
     print(type(obs))
     print("envs working")
 
@@ -388,7 +390,7 @@ def train(args=None):
                            num_simulations=num_simulations,
                            temperature=temperature)
             obs_next, r, done, truncated, info = envs.step(a)
-            # print(f"Value: {v}, reward: {r}")
+            print(f"Value: {v}, reward: {r}")
             #       if truncated:
             #         r = 1 / (1 - tracer.gamma)
             for i, (tracer, trajectory) in enumerate(zip(tracers, trajectories)):
@@ -396,6 +398,7 @@ def train(args=None):
                 while tracer:
                     trans = tracer.pop()
                     trajectory.add(trans)
+                print(done[i])
                 if done[i] or truncated[i]:
                     # Note: sync vector is automatically reset, so no need to do it manually
                     if len(trajectory) >= k_steps:
@@ -406,7 +409,7 @@ def train(args=None):
                     print('finished early:', t)
 
             if episodes_finished >= episodes_per_epoch:
-                break;
+                break
 
             obs = obs_next 
         for trajectory in trajectories:
@@ -424,6 +427,15 @@ def train(args=None):
     
     start_time = time.time()
     global_step = 0
+
+    _, old_test_policy, _ = model.act(subkey, test_obs, 
+                            with_pi=True, 
+                            with_value=True, 
+                            obs_from_batch=False,
+                            num_simulations=num_simulations,
+                            temperature=temperature,
+                            max_depth = None)
+    
     for ep in range(max_epochs):
         print(f"New epoch: {ep}")
         obs, info = envs.reset(seed=random_seed)   
@@ -466,6 +478,12 @@ def train(args=None):
   #             r = 1 / (1 - tracer.gamma)
             for i, (tracer, trajectory) in enumerate(zip(tracers, trajectories)):
                 tracer.add(obs[i], a[i], r[i], done[i] or truncated[i], v=v[i], pi=pi[i])
+
+                writer.add_scalar(
+                    "relative entropy",
+                    logger.relative_entropy(pi[0]),
+                    global_step
+                )
                 while tracer:
                     trans = tracer.pop()
                     trajectory.add(trans)
@@ -510,6 +528,13 @@ def train(args=None):
         writer.add_scalar("temperature", temperature, global_step);
         writer.add_scalar("SPS", int(global_step / (time.time() - start_time)), global_step)
         writer.add_histogram("actions", np.array(action_log), global_step)
+        writer.add_scalar("number of episodes", local_step, global_step)
+
+        percent_forward, percent_jump, percent_look = logger.action_types(action_log)
+        writer.add_scalar("percent time moving forward", percent_forward, global_step)
+        writer.add_scalar("percent time jumping", percent_jump, global_step)
+        writer.add_scalars("percent time looking looking", percent_look, global_step)
+
 
         if args.track:
             wandb.log({"total episode reward": total_r})
@@ -525,8 +550,23 @@ def train(args=None):
 
         print("model updated")
 
+        _, new_test_policy, _ = model.act(subkey, test_obs, 
+                                    with_pi=True, 
+                                    with_value=True, 
+                                    obs_from_batch=False,
+                                    num_simulations=num_simulations,
+                                    temperature=temperature,
+                                    max_depth = None)
+        
+        writer.add_scalar("KL divergence", logger.kl_divergence(old_test_policy[0], new_test_policy[0]), global_step)
+
+        print("1")
+        old_test_policy = new_test_policy
+        print("2")
+
         train_loss /= num_update_per_epoch
-        writer.add_scalar("train_loss", train_loss, ep);
+        writer.add_scalar("train_loss", train_loss, training_step)
+        print("3")
 
         #######################################################################
         # Model Saving
@@ -555,7 +595,6 @@ def train(args=None):
                 model_path = os.path.join(model_dir, model_folder_name, save_name)
                 model.save(model_path)
         print(f"Time testing: {time.time() - t_testing_start}")
-
 
     print(model_path)
     writer.close()
