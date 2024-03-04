@@ -225,7 +225,6 @@ class DiscreteMouseAction(MinetestWrapper):
         self.max_mouse_move = max_mouse_move
         self.num_mouse_actions = num_mouse_bins**2
         self.num_mouse_bins = num_mouse_bins
-        print(self.max_mouse_move)
         self.bin_size = 2 * self.max_mouse_move / (self.num_mouse_bins - 1)
         self.quantization_scheme = quantization_scheme
         self.mu = mu
