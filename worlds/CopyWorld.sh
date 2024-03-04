@@ -2,8 +2,8 @@
 
 echo "hello world"
 
-rm -r ToCopy
-mkdir ToCopy
+rm -r worlds/ToCopy
+mkdir worlds/ToCopy
 
 if [[ -z $@ ]]; then
    num=5
@@ -16,8 +16,8 @@ echo $num
 for ((i = 0 ; i < $num ; i++ ))
 do
    #echo "Welcome $i times"
-   cp -r World_Train ToCopy 
-   mv ToCopy/World_Train ToCopy/$i
+   cp -r worlds/World_Train worlds/ToCopy 
+   mv worlds/ToCopy/World_Train worlds/ToCopy/$i
 
 done
 
