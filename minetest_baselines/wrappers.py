@@ -34,6 +34,19 @@ class PenalizeJumping(MinetestWrapper):
         obs, rew, done, trunc, info = self.env.step(action)
         rew += penalty
         return obs, rew, done, trunc, info
+    
+class PenalizeLookingUpAndDown(MinetestWrapper):
+    def __init__(self, env, penalty=0.01):
+        super().__init__(env)
+        self.penalty = penalty
+
+    def step(self, action):
+        penalty = 0
+        if action["MOUSE"] % 3 == 2 or action["MOUSE"] % 3 == 0:
+            penalty = -self.penalty
+        obs, rew, done, trunc, info = self.env.step(action)
+        rew += penalty
+        return obs, rew, done, trunc, info
 
 
 class FlattenMultiDiscreteActions(gym.Wrapper):
@@ -140,6 +153,65 @@ class SelectKeyActions(MinetestWrapper):
         return self.env.step(full_action)
 
 
+class DiscreteMouseAction1D(MinetestWrapper):
+    def __init__(
+        self,
+        env: gym.Env,
+        num_mouse_bins: int = 3,
+        max_mouse_move = 1,
+        quantization_scheme: str = "linear",
+        mu: float = 5.0,
+    ):
+        super().__init__(env)
+        self.max_mouse_move = max_mouse_move
+        self.num_mouse_actions = num_mouse_bins
+        self.num_mouse_bins = num_mouse_bins
+        self.bin_size = 2 * self.max_mouse_move / (self.num_mouse_bins - 1)
+        self.quantization_scheme = quantization_scheme
+        self.mu = mu
+
+        self.mouse_action_space = gym.spaces.Discrete(self.num_mouse_actions)
+
+        # print(self.env.action_space)
+        # print()
+        # print(type(self.env.action_space))
+        # print()
+        # assert isinstance(self.env.action_space, gym.spaces.Dict)
+
+        self.action_space = gym.spaces.Dict(
+            {
+                **{
+                    key: space
+                    for key, space in self.env.action_space.items()
+                    if key != "MOUSE"
+                },
+                **{"MOUSE": self.mouse_action_space},
+            },
+        )
+
+    def discretize(self, x):
+        x = np.clip(x, -self.max_mouse_move, self.max_mouse_move)
+
+        return np.round((x + self.max_mouse_move) / self.bin_size).astype(np.int64)
+
+    def undiscretize(self, x):
+        x[0] = x[0] * self.bin_size - self.max_mouse_move
+
+        return x
+
+    def step(self, action):
+        mouse_action = action["MOUSE"]
+        if not isinstance(mouse_action, np.ndarray):
+            mouse_action = np.ndarray(mouse_action)
+        if mouse_action.shape == ():
+            mouse_action = mouse_action[None]
+        xy_action = np.concatenate(
+            np.unravel_index(mouse_action, (self.num_mouse_bins, 1)),
+        )
+        undisc_mouse_action = self.undiscretize(xy_action)
+        action["MOUSE"] = undisc_mouse_action.astype(int)
+        return self.env.step(action)
+
 class DiscreteMouseAction(MinetestWrapper):
     def __init__(
         self,
@@ -153,17 +225,12 @@ class DiscreteMouseAction(MinetestWrapper):
         self.max_mouse_move = max_mouse_move
         self.num_mouse_actions = num_mouse_bins**2
         self.num_mouse_bins = num_mouse_bins
+        print(self.max_mouse_move)
         self.bin_size = 2 * self.max_mouse_move / (self.num_mouse_bins - 1)
         self.quantization_scheme = quantization_scheme
         self.mu = mu
 
         self.mouse_action_space = gym.spaces.Discrete(self.num_mouse_actions)
-
-        # print(self.env.action_space)
-        # print()
-        # print(type(self.env.action_space))
-        # print()
-        # assert isinstance(self.env.action_space, gym.spaces.Dict)
 
         self.action_space = gym.spaces.Dict(
             {
@@ -199,6 +266,7 @@ class DiscreteMouseAction(MinetestWrapper):
             )
             v_decode *= self.max_mouse_move
             xy = v_decode
+        # print(f"Undiscretized {xy}")
         return xy
 
     def step(self, action):

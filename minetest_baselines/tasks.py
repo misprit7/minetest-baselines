@@ -6,9 +6,11 @@ from minetest_baselines.wrappers import (
     AlwaysDig,
     DictToMultiDiscreteActions,
     DiscreteMouseAction,
+    DiscreteMouseAction1D,
     FlattenMultiDiscreteActions,
     PenalizeJumping,
     SelectKeyActions,
+    PenalizeLookingUpAndDown,
 )
 
 
@@ -21,13 +23,13 @@ def wrapped_treechop_env(**kwargs):
     env = DiscreteMouseAction(
         env,
         num_mouse_bins=3,
-        max_mouse_move=25,
+        max_mouse_move=1,
         quantization_scheme="linear",
     )
     # make breaking blocks easier to learn
-    env = AlwaysDig(env)
+    # env = AlwaysDig(env)
     # only allow basic movements
-    env = SelectKeyActions(env, select_keys={"FORWARD", "JUMP"})
+    env = SelectKeyActions(env, select_keys={"JUMP", "FORWARD"})
     # jumping usually interrupts progress towards
     # breaking nodes; apply penalty to learn faster
     env = PenalizeJumping(env, 0.01)
