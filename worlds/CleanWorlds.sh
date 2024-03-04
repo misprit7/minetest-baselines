@@ -1,5 +1,5 @@
 #!/bin/bash
 
-rm -r ToCopy
+rm -r worlds/ToCopy
 
 echo "Cleaned"
