@@ -20,12 +20,12 @@ def wrapped_treechop_env(**kwargs):
     )
     env = TimeLimit(env, 500)
     # action space wrappers
-    env = DiscreteMouseAction(
-        env,
-        num_mouse_bins=3,
-        max_mouse_move=1,
-        quantization_scheme="linear",
-    )
+    # env = DiscreteMouseAction(
+    #     env,
+    #     num_mouse_bins=3,
+    #     max_mouse_move=1,
+    #     quantization_scheme="linear",
+    # )
     # make breaking blocks easier to learn
     # env = AlwaysDig(env)
     # only allow basic movements

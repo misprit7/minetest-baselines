@@ -109,6 +109,18 @@ def parse_args(args=None):
         default=1000,
         help="total epochs of the experiments",
     )
+    parser.add_argument(
+        "--world-dir",
+        type=str,
+        default=None,
+        help="the path to an existing world directory",
+    )
+    parser.add_argument(
+        "--config-path",
+        type=str,
+        default=None,
+        help="the path to an existing minetest.conf file",
+    )
 
     if args is None:
         args = parser.parse_args()
@@ -154,17 +166,19 @@ def temperature_fn(max_epochs, training_epochs):
 # This is similar to dqn, not entirely sure but I think this awkward helper function
 # is to prevent a lambda from capturing an indexing variables whne making the 
 # SyncVectorEnv
-def make_env(env_id, seed, idx, capture_video, run_name, headless=False):
+def make_env(env_id, seed, idx, capture_video, run_name, headless=False, world_dir = None, config_path = None):
     def thunk():
         env = gym.make(
             env_id,
             world_seed=seed,
             start_xvfb=headless, #True for remote, false for local
             headless=True,
-            env_port=5555+idx,
-            server_port=30000+idx,
-            #x_display=4,
+            env_port=5755+idx,
+            server_port=30200+idx,
+            x_display=4,
             render_mode="rgb_array",
+            world_dir=world_dir,
+            config_path=config_path,
         )
         env = LazyWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -225,7 +239,7 @@ def train(args=None):
     if args.headless:
         start_xserver(4)
     envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.headless)
+        make_env(args.env_id, args.seed, i, args.capture_video, run_name, headless=args.headless, world_dir = args.world_dir, config_path = args.config_path)
         for i in range(args.num_envs)
     ])
 
@@ -522,6 +536,7 @@ def train(args=None):
         writer.add_scalar("SPS", int(global_step / (time.time() - start_time)), global_step)
         writer.add_histogram("actions", np.array(action_log), global_step)
         writer.add_scalar("number of episodes", local_step, global_step)
+        print(f"LOCAL STEP {local_step}")
 
         percent_forward, percent_jump, percent_look = logger.action_types(action_log)
         writer.add_scalar("percent time moving forward", percent_forward, global_step)
