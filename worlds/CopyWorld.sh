@@ -2,12 +2,6 @@
 
 echo "hello world"
 
-<<<<<<< HEAD
-rm -r ToCopy/WorldTrain
-mkdir ToCopy/WorldTrain
-
-cp -r ToCopy/World1/. ToCopy/WorldTrain
-=======
 rm -r worlds/ToCopy
 mkdir worlds/ToCopy
 
@@ -26,7 +20,6 @@ do
    mv worlds/ToCopy/World_Train worlds/ToCopy/$i
 
 done
->>>>>>> origin/customWorld
 
 echo "Complete!"
 

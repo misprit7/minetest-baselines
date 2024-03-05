@@ -331,11 +331,7 @@ def train(args=None):
     # xserver = start_xserver(4)
     envs = gym.vector.SyncVectorEnv(
         [
-<<<<<<< HEAD
-            make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.world_dir, args.config_path)
-=======
             make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.world_dir + '/' + str(i), args.config_path)
->>>>>>> origin/customWorld
             for i in range(args.num_envs)
         ],
     )

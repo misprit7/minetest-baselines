@@ -173,8 +173,8 @@ def make_env(env_id, seed, idx, capture_video, run_name, headless=False, world_d
             world_seed=seed,
             start_xvfb=headless, #True for remote, false for local
             headless=True,
-            env_port=5755+idx,
-            server_port=30200+idx,
+            env_port=5555+idx,
+            server_port=30000+idx,
             x_display=4,
             render_mode="rgb_array",
             world_dir=world_dir,
@@ -187,7 +187,7 @@ def make_env(env_id, seed, idx, capture_video, run_name, headless=False, world_d
             env = gym.wrappers.RecordVideo(
                 env,
                 f"videos/{run_name}",
-                lambda x: x % 100 == 0,
+                lambda x: x % 1 == 0,
             )
 
 
@@ -405,7 +405,6 @@ def train(args=None):
                 while tracer:
                     trans = tracer.pop()
                     trajectory.add(trans)
-                print(done[i])
                 if done[i] or truncated[i]:
                     # Note: sync vector is automatically reset, so no need to do it manually
                     if len(trajectory) >= k_steps:
@@ -595,6 +594,7 @@ def train(args=None):
         if ep % test_interval == 0:
             test_G = test(model, test_env, test_key, num_simulations=num_simulations, max_env_steps=max_env_steps)
             writer.add_scalar("test_G", test_G, global_step)
+            print(f"TEST RESULT {test_G}")
             if test_G >= best_test_G:
                 best_test_G = test_G
                 model_folder_name = f'epoch_{ep:04d}_test_G_{test_G:.8f}'

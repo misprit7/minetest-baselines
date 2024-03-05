@@ -27,7 +27,7 @@ def wrapped_treechop_env(**kwargs):
     #     quantization_scheme="linear",
     # )
     # make breaking blocks easier to learn
-    # env = AlwaysDig(env)
+    env = AlwaysDig(env)
     # only allow basic movements
     env = SelectKeyActions(env, select_keys={"JUMP", "FORWARD"})
     # jumping usually interrupts progress towards
