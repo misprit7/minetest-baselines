@@ -124,6 +124,13 @@ def parse_args(args=None):
         default=None,
         help="the path to an existing minetest.conf file",
     )
+    parser.add_argument(
+        "--max-env-steps",
+        type=int,
+        default=1000,
+        help="The maximum number of steps the agent takes before getting truncated",
+
+    )
 
     if args is None:
         args = parser.parse_args()
@@ -173,7 +180,7 @@ def suppress_warnings():
 # This is similar to dqn, not entirely sure but I think this awkward helper function
 # is to prevent a lambda from capturing an indexing variables whne making the 
 # SyncVectorEnv
-def make_env(env_id, seed, idx, capture_video, run_name, max_env_steps = 500, xvfb=False, world_dir = None, config_path = None):
+def make_env(env_id, seed, idx, capture_video, run_name, max_env_steps = 1000, xvfb=False, world_dir = None, config_path = None):
     def thunk():
         env = gym.make(
             env_id,
@@ -195,8 +202,7 @@ def make_env(env_id, seed, idx, capture_video, run_name, max_env_steps = 500, xv
             env = gym.wrappers.RecordVideo(
                 env,
                 f"videos/{run_name}",
-                step_trigger = None,
-                episode_trigger=lambda x: x % 1 == 0,
+                lambda x: x % 5 == 0,
             )
 
 
@@ -209,7 +215,7 @@ def make_env(env_id, seed, idx, capture_video, run_name, max_env_steps = 500, xv
 # Test function, taken from Muax and modified for sync vector
 # For simplicity also changed so that each test is run on num_envs episodes
 def test(model, envs, key, num_simulations, max_env_steps, random_seed=None):
-    num_envs = len(envs.envs)
+    num_envs = envs.num_envs
     total_reward = np.zeros(num_envs)
 
     obs, info = envs.reset(seed=random_seed)
@@ -251,7 +257,15 @@ def train(args=None):
     if args.xvfb:
         start_xserver(0)
     envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.xvfb, world_dir = args.world_dir + '/' + str(i), config_path = args.config_path)
+        make_env(args.env_id,
+                 args.seed,
+                 i,
+                 args.capture_video,
+                 run_name,
+                 max_env_steps = args.max_env_steps,
+                 xvfb = args.xvfb,
+                 world_dir = args.world_dir + '/' + str(i),
+                 config_path = args.config_path)
         for i in range(args.num_envs)
     ])
 
@@ -363,7 +377,7 @@ def train(args=None):
 
     num_update_per_epoch = args.updates_per_epoch
     episodes_per_epoch = args.episodes_per_epoch
-    max_env_steps = 500 # Steps per episode
+    max_env_steps = args.max_env_steps # Steps per episode
 
 
     ###########################################################################
@@ -408,7 +422,7 @@ def train(args=None):
                            num_simulations=num_simulations,
                            temperature=temperature)
             obs_next, r, done, truncated, info = envs.step(a)
-            # print(f"Value: {v}, reward: {r}")
+            print(f"Value: {v}, reward: {r}")
             #       if truncated:
             #         r = 1 / (1 - tracer.gamma)
             for i, (tracer, trajectory) in enumerate(zip(tracers, trajectories)):
@@ -416,6 +430,7 @@ def train(args=None):
                 while tracer:
                     trans = tracer.pop()
                     trajectory.add(trans)
+                #print(done[i])
                 if done[i] or truncated[i]:
                     # Note: sync vector is automatically reset, so no need to do it manually
                     if len(trajectory) >= k_steps:
@@ -423,14 +438,14 @@ def train(args=None):
                         buffer.add(trajectory, trajectory.batched_transitions.w.mean())
                     trajectories[i] = muax.Trajectory()
                     episodes_finished += 1
-                    print('finished early:', t)
+                    #print('finished early:', t)
 
             if episodes_finished >= episodes_per_epoch:
                 break
 
             obs = obs_next 
         for trajectory in trajectories:
-            print(len(trajectory))
+            #print(len(trajectory))
             if len(trajectory) >= k_steps:
                 trajectory.finalize()
                 buffer.add(trajectory, trajectory.batched_transitions.w.mean())
@@ -525,6 +540,8 @@ def train(args=None):
                         buffer.add(trajectory, trajectory.batched_transitions.w.mean())
                     episodes_finished += 1
 
+
+
             if episodes_finished >= episodes_per_epoch:
                 break;
             obs = obs_next 
@@ -578,13 +595,10 @@ def train(args=None):
         
         writer.add_scalar("KL divergence", logger.kl_divergence(old_test_policy[0], new_test_policy[0]), global_step)
 
-        print("1")
         old_test_policy = new_test_policy
-        print("2")
 
         train_loss /= num_update_per_epoch
         writer.add_scalar("train_loss", train_loss, training_step)
-        print("3")
 
         #######################################################################
         # Model Saving
@@ -631,7 +645,7 @@ if __name__ == '__main__':
         start_xserver(0)
     print("Starting, num envs:", args.num_envs)
     envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env_id, args.seed, i, False, 'test', False)
+        make_env(args.env_id, args.seed, i, False, 'test', args.xvfb)
         for i in range(args.num_envs)
     ])
 
