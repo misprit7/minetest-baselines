@@ -3,6 +3,7 @@ import argparse
 import os
 import time
 from distutils.util import strtobool
+import warnings
 
 import jax
 from jax import numpy as jnp
@@ -77,12 +78,12 @@ def parse_args(args=None):
         help="the number of environments to sample from",
     )
     parser.add_argument(
-        "--headless",
+        "--xvfb",
         type=lambda x: bool(strtobool(x)),
         default=False,
         nargs="?",
         const=True,
-        help="whether minetest is executing on a headless machine",
+        help="whether minetest requires xvfb to run",
     )
 
     # Algorithm specific
@@ -165,17 +166,21 @@ def temperature_fn(max_epochs, training_epochs):
   else:
       return 0.25
 
+def suppress_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning, message=".*obs returned by the `.+\(\)` method was expecting a numpy array.*")
+    warnings.filterwarnings("ignore", category=UserWarning, message=".*Casting input x to numpy array.*")
+
 # This is similar to dqn, not entirely sure but I think this awkward helper function
 # is to prevent a lambda from capturing an indexing variables whne making the 
 # SyncVectorEnv
-def make_env(env_id, seed, idx, capture_video, run_name, max_env_steps = 500, headless=False, world_dir = None, config_path = None):
+def make_env(env_id, seed, idx, capture_video, run_name, max_env_steps = 500, xvfb=False, world_dir = None, config_path = None):
     def thunk():
         env = gym.make(
             env_id,
             max_env_steps=max_env_steps,
             world_seed=seed,
-            start_xvfb=headless, #True for remote, false for local
-            headless=True,
+            start_xvfb=False, #True for remote, false for local
+            headless=(not xvfb),
             env_port=5555+idx,
             server_port=30000+idx,
             x_display=4,
@@ -204,7 +209,7 @@ def make_env(env_id, seed, idx, capture_video, run_name, max_env_steps = 500, he
 # Test function, taken from Muax and modified for sync vector
 # For simplicity also changed so that each test is run on num_envs episodes
 def test(model, envs, key, num_simulations, max_env_steps, random_seed=None):
-    num_envs = 1#len(envs.envs)
+    num_envs = len(envs.envs)
     total_reward = np.zeros(num_envs)
 
     obs, info = envs.reset(seed=random_seed)
@@ -236,15 +241,17 @@ def train(args=None):
     else:
         args = parse_args(args)
 
+    suppress_warnings()
+
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
     subprocess.call("./worlds/CopyWorld.sh")
 
     # Set up minetest
-    if args.headless:
-        start_xserver(4)
+    if args.xvfb:
+        start_xserver(0)
     envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env_id, args.seed, i, args.capture_video, run_name, headless=args.headless, world_dir = args.world_dir + '/' + str(i), config_path = args.config_path)
+        make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.xvfb, world_dir = args.world_dir + '/' + str(i), config_path = args.config_path)
         for i in range(args.num_envs)
     ])
 
@@ -401,7 +408,7 @@ def train(args=None):
                            num_simulations=num_simulations,
                            temperature=temperature)
             obs_next, r, done, truncated, info = envs.step(a)
-            print(f"Value: {v}, reward: {r}")
+            # print(f"Value: {v}, reward: {r}")
             #       if truncated:
             #         r = 1 / (1 - tracer.gamma)
             for i, (tracer, trajectory) in enumerate(zip(tracers, trajectories)):
@@ -617,5 +624,25 @@ def train(args=None):
     writer.close()
     print("Finished fit")
 
-if __name__ == "__main__":
-    train()
+if __name__ == '__main__':
+    suppress_warnings()
+    args = parse_args()
+    if args.xvfb:
+        start_xserver(0)
+    print("Starting, num envs:", args.num_envs)
+    envs = gym.vector.AsyncVectorEnv([
+        make_env(args.env_id, args.seed, i, False, 'test', False)
+        for i in range(args.num_envs)
+    ])
+
+    print("Start envs sanity check")
+    obs, _ = envs.reset()
+    print(type(obs))
+    print("envs working")
+
+    num_steps = int(5000 / args.num_envs)
+    t_start = time.time()
+    for i in range(num_steps):
+        print('Steps per second: ', i*args.num_envs/(time.time()-t_start))
+        obs, _, _, _, _ = envs.step([4]*args.num_envs)
+        if i%50 == 0: envs.reset()
