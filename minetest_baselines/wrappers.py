@@ -158,7 +158,7 @@ class DiscreteMouseAction1D(MinetestWrapper):
         self,
         env: gym.Env,
         num_mouse_bins: int = 3,
-        max_mouse_move = 1,
+        max_mouse_move = 0.1,
         quantization_scheme: str = "linear",
         mu: float = 5.0,
     ):
@@ -297,7 +297,7 @@ if __name__ == "__main__":
     env = DiscreteMouseAction(
         env,
         num_mouse_bins=5,
-        max_mouse_move=0.1,
+        max_mouse_move=0.05,
         quantization_scheme="linear",
     )
     # Visualize the discretization of mouse actions
