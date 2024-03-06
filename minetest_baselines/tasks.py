@@ -14,25 +14,27 @@ from minetest_baselines.wrappers import (
 )
 
 
-def wrapped_treechop_env(**kwargs):
+def wrapped_treechop_env(max_env_steps = 1500, **kwargs):
     env = Minetest(
         **kwargs,
     )
-    env = TimeLimit(env, 500)
+
+    env = TimeLimit(env, max_env_steps)
     # action space wrappers
-    # env = DiscreteMouseAction(
-    #     env,
-    #     num_mouse_bins=3,
-    #     max_mouse_move=1,
-    #     quantization_scheme="linear",
-    # )
+    env = DiscreteMouseAction1D(
+        env,
+        num_mouse_bins=3,
+        max_mouse_move=1,
+        quantization_scheme="linear",
+    )
     # make breaking blocks easier to learn
     env = AlwaysDig(env)
     # only allow basic movements
-    env = SelectKeyActions(env, select_keys={"JUMP", "FORWARD"})
+    # env = SelectKeyActions(env, select_keys={"JUMP", "FORWARD"})
+    env = SelectKeyActions(env, select_keys={"FORWARD"})
     # jumping usually interrupts progress towards
     # breaking nodes; apply penalty to learn faster
-    env = PenalizeJumping(env, 0.01)
+    # env = PenalizeJumping(env, 0.01)
     # transform into pure discrete action space
     env = DictToMultiDiscreteActions(env)
     env = FlattenMultiDiscreteActions(env)

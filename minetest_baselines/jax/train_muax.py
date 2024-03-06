@@ -168,10 +168,11 @@ def temperature_fn(max_epochs, training_epochs):
 # This is similar to dqn, not entirely sure but I think this awkward helper function
 # is to prevent a lambda from capturing an indexing variables whne making the 
 # SyncVectorEnv
-def make_env(env_id, seed, idx, capture_video, run_name, headless=False, world_dir = None, config_path = None):
+def make_env(env_id, seed, idx, capture_video, run_name, max_env_steps = 500, headless=False, world_dir = None, config_path = None):
     def thunk():
         env = gym.make(
             env_id,
+            max_env_steps=max_env_steps,
             world_seed=seed,
             start_xvfb=headless, #True for remote, false for local
             headless=True,
@@ -180,7 +181,7 @@ def make_env(env_id, seed, idx, capture_video, run_name, headless=False, world_d
             x_display=4,
             render_mode="rgb_array",
             world_dir=world_dir,
-            config_path=config_path,
+            config_path=config_path
         )
         env = LazyWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -189,7 +190,8 @@ def make_env(env_id, seed, idx, capture_video, run_name, headless=False, world_d
             env = gym.wrappers.RecordVideo(
                 env,
                 f"videos/{run_name}",
-                lambda x: x % 1 == 0,
+                step_trigger = None,
+                episode_trigger=lambda x: x % 1 == 0,
             )
 
 
@@ -354,8 +356,7 @@ def train(args=None):
 
     num_update_per_epoch = args.updates_per_epoch
     episodes_per_epoch = args.episodes_per_epoch
-    # max_env_steps = 500 # Steps per episode
-    max_env_steps = 50 # Steps per episode
+    max_env_steps = 500 # Steps per episode
 
 
     ###########################################################################
@@ -483,6 +484,9 @@ def train(args=None):
                 total_r += r[i]
                 action_count[a[i]] += 1
                 action_log += [a[i]]
+                if done[i] or truncated[i]:
+                    print(f"number of steps in episode {t}")
+                    writer.add_scalar("number of steps in episode", t, global_step)
   #           if truncated:
   #             r = 1 / (1 - tracer.gamma)
             for i, (tracer, trajectory) in enumerate(zip(tracers, trajectories)):
@@ -514,8 +518,6 @@ def train(args=None):
                         buffer.add(trajectory, trajectory.batched_transitions.w.mean())
                     episodes_finished += 1
 
-
-
             if episodes_finished >= episodes_per_epoch:
                 break;
             obs = obs_next 
@@ -538,7 +540,6 @@ def train(args=None):
         writer.add_scalar("SPS", int(global_step / (time.time() - start_time)), global_step)
         writer.add_histogram("actions", np.array(action_log), global_step)
         writer.add_scalar("number of episodes", local_step, global_step)
-        print(f"LOCAL STEP {local_step}")
 
         percent_forward, percent_jump, percent_look = logger.action_types(action_log)
         writer.add_scalar("percent time moving forward", percent_forward, global_step)
