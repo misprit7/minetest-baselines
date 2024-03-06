@@ -84,6 +84,15 @@ def parse_args(args=None):
         help="whether minetest requires xvfb to run",
     )
 
+    parser.add_argument(
+        "--render",
+        type=lambda x: bool(strtobool(x)),
+        default=False,
+        nargs="?",
+        const=True,
+        help="whether to render game live (doesn't work with xvfb)",
+    )
+
     # Algorithm specific
     parser.add_argument(
         "--env-id",
@@ -159,7 +168,7 @@ def suppress_warnings():
 # This is similar to dqn, not entirely sure but I think this awkward helper function
 # is to prevent a lambda from capturing an indexing variables whne making the 
 # SyncVectorEnv
-def make_env(env_id, seed, idx, capture_video, run_name, xvfb=False):
+def make_env(env_id, seed, idx, capture_video, run_name, xvfb=False, render=False):
     def thunk():
         env = gym.make(
             env_id,
@@ -169,7 +178,7 @@ def make_env(env_id, seed, idx, capture_video, run_name, xvfb=False):
             env_port=5555+idx,
             server_port=30000+idx,
             #x_display=4,
-            render_mode="rgb_array",
+            render_mode='human' if render else 'rgb_array',
         )
         env = LazyWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -232,7 +241,7 @@ def train(args=None):
     if args.xvfb:
         start_xserver(0)
     envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.xvfb)
+        make_env(args.env_id, args.seed, i, args.capture_video, run_name, args.xvfb, args.render)
         for i in range(args.num_envs)
     ])
 
@@ -275,6 +284,9 @@ def train(args=None):
 
     model = muax.MuZero(repr_fn, pred_fn, dy_fn, policy='muzero', discount=discount,
                         optimizer=gradient_transform, support_size=support_size)
+
+    # Use this to load preexisting model
+    # model.load('path')
 
     ###########################################################################
     # Logging Set Up
@@ -337,15 +349,15 @@ def train(args=None):
     model_save_path = None
     save_name = None
     test_interval = 10
-    num_test_episodes = 10
     test_env = envs
     # buffer_warm_up = 32
-    buffer_warm_up = 1
+    # buffer_warm_up = 1
+    buffer_warm_up = 0
 
     num_update_per_epoch = args.updates_per_epoch
     episodes_per_epoch = args.episodes_per_epoch
-    max_env_steps = 1000 # Steps per episode
-    #max_env_steps = 50 # Steps per episode
+    max_env_steps = 500 # Steps per episode
+    # max_env_steps = 50 # Steps per episode
 
 
     ###########################################################################
@@ -406,7 +418,7 @@ def train(args=None):
                         buffer.add(trajectory, trajectory.batched_transitions.w.mean())
                     trajectories[i] = muax.Trajectory()
                     episodes_finished += 1
-                    #print('finished early:', t)
+                    # print('finished early:', t)
 
             if episodes_finished >= episodes_per_epoch:
                 break
@@ -433,14 +445,14 @@ def train(args=None):
                             with_value=True, 
                             obs_from_batch=False,
                             num_simulations=num_simulations,
-                            temperature=temperature,
+                            temperature=1,
                             max_depth = None)
     
     for ep in range(max_epochs):
         print(f"New epoch: {ep}")
         obs, info = envs.reset(seed=random_seed)   
         for tracer in tracers: tracer.reset()
-        trajectories = muax.Trajectory()
+        trajectories = [muax.Trajectory() for _ in range(args.num_envs)]
         temperature = temperature_fn(max_epochs=max_epochs, training_epochs=ep)
 
         # Logging metrics
@@ -464,8 +476,11 @@ def train(args=None):
                            obs_from_batch=True,
                            num_simulations=num_simulations,
                            temperature=temperature)
-
             obs_next, r, done, truncated, info = envs.step(a)
+            if args.render:
+                envs.call_async('render')
+                envs.call_wait()
+
             global_step += args.num_envs
             local_step += args.num_envs
 
@@ -500,6 +515,7 @@ def train(args=None):
                     # )
                 if done[i] or truncated[i]:
                     # Note: sync vector is automatically reset, so no need to do it manually
+                    # print("Env finished")
                     if len(trajectory) >= k_steps:
                         trajectory.finalize()
                         buffer.add(trajectory, trajectory.batched_transitions.w.mean())
@@ -604,18 +620,25 @@ if __name__ == '__main__':
         start_xserver(0)
     print("Starting, num envs:", args.num_envs)
     envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env_id, args.seed, i, False, 'test', args.xvfb)
+        make_env(args.env_id, args.seed, i, False, 'test', args.xvfb, args.render)
         for i in range(args.num_envs)
     ])
+    # env = make_env(args.env_id, args.seed, args.num_envs+1, False, 'test', args.xvfb, args.render)()
 
     print("Start envs sanity check")
     obs, _ = envs.reset()
+    # obs1, _ = env.reset()
     print(type(obs))
     print("envs working")
+
+    # env.render()
 
     num_steps = int(5000 / args.num_envs)
     t_start = time.time()
     for i in range(num_steps):
         print('Steps per second: ', i*args.num_envs/(time.time()-t_start))
         obs, _, _, _, _ = envs.step([4]*args.num_envs)
-        if i%50 == 0: envs.reset()
+        if args.render:
+            envs.call_async('render')
+            envs.call_wait()
+        # if i%50 == 0: envs.reset()
