@@ -18,6 +18,8 @@ import minetest_baselines.tasks  # noqa
 
 from minetester.utils import start_xserver
 
+#Probe environment import
+import subprocess
 # Debugging imports
 import minetest_baselines.utils.test_envs
 import minetest_baselines.utils.logging as logger
@@ -234,12 +236,13 @@ def train(args=None):
 
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
+    subprocess.call("./worlds/CopyWorld.sh")
 
     # Set up minetest
     if args.headless:
         start_xserver(4)
     envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env_id, args.seed, i, args.capture_video, run_name, headless=args.headless, world_dir = args.world_dir, config_path = args.config_path)
+        make_env(args.env_id, args.seed, i, args.capture_video, run_name, headless=args.headless, world_dir = args.world_dir + '/' + str(i), config_path = args.config_path)
         for i in range(args.num_envs)
     ])
 
@@ -603,6 +606,11 @@ def train(args=None):
                 model_path = os.path.join(model_dir, model_folder_name, save_name)
                 model.save(model_path)
         print(f"Time testing: {time.time() - t_testing_start}")
+
+    # Cleans the worlds after done running each one
+    # In DQN This went after envs.close(), but I think this just needs to be done after training sometime. 
+    subprocess.call("./worlds/CleanWorlds.sh")
+
 
     print(model_path)
     writer.close()
