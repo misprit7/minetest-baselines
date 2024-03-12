@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 import gymnasium as gym
 import minetest_baselines.tasks  # noqa
+from minetest_baselines.curriculum import (
+    UniformCurriculum,
+    SequentialCurriculum,
+)
 
 render = True
 max_steps = 100
 
 env_id = "minetester-treechop_shaped-v0"
-seed = 0
+seed = "0"
+
+env_dirs = ["../../../../minetest/worlds/test", "../../../../minetest/worlds/world1", "../../../../minetest/worlds/world1", "../../../../minetest/worlds/world1"]
+curr = SequentialCurriculum(env_dirs)
 
 env = gym.make(
             env_id,
-            base_seed=seed,
+            # curriculum = curr,
+            # world_dir = env_dirs[0],
             headless=False,
             start_xvfb=True,
             env_port=5555,

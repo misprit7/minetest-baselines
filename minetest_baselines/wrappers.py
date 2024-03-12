@@ -14,6 +14,18 @@ class MinetestWrapper(gym.Wrapper):
         ), "This wrapper only works on Minetest environments."
         super().__init__(env)
 
+    def reset(self, **kwargs):
+        print(self.env.world_seed)
+        return self.env.reset(**kwargs)
+
+class LearningCurriculum(MinetestWrapper):
+    def __init__(self, env, curriculum):
+        super().__init__(env)
+        self.curriculum = curriculum
+
+    def reset(self, **kwargs):
+        self.env.world_dir = self.curriculum.suggest_env()
+        return self.env.reset(**kwargs)
 
 class AlwaysDig(MinetestWrapper):
     def step(self, action):
