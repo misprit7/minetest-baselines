@@ -1,4 +1,3 @@
-
 import argparse
 import os
 import time
@@ -10,6 +9,7 @@ from jax import numpy as jnp
 
 import muax
 from muax import nn
+import pdb
 
 from tensorboardX import SummaryWriter
 
@@ -493,6 +493,7 @@ def train(args=None):
   #             r = 1 / (1 - tracer.gamma)
             for i, (tracer, trajectory) in enumerate(zip(tracers, trajectories)):
                 tracer.add(obs[i], a[i], r[i], done[i] or truncated[i], v=v[i], pi=pi[i])
+                # print('a: ', a[i], 'r: ', r[i])
 
                 writer.add_scalar(
                     "relative entropy",
@@ -536,15 +537,40 @@ def train(args=None):
         #######################################################################
         # Training
         #######################################################################
+        train_loss = 0
+        t_training_start = time.time()
+        for _ in range(num_update_per_epoch):
+            transition_batch = buffer.sample(num_trajectory=num_trajectory,
+                                              sample_per_trajectory=sample_per_trajectory,
+                                              k_steps=k_steps)
+            # Useful: stop here for debugging
+            # pdb.set_trace()
+            loss_metric = model.update(transition_batch)
+            train_loss += loss_metric['loss']
+        print(f"Time training: {time.time() - t_training_start}")
+
+        print("model updated")
+
+        _, new_test_policy, _ = model.act(subkey, test_obs,
+                                    with_pi=True, 
+                                    with_value=True, 
+                                    obs_from_batch=False,
+                                    num_simulations=num_simulations,
+                                    temperature=temperature,
+                                    max_depth = None)
+        
+        #######################################################################
+        # Logging
+        #######################################################################
         print(f"Time stepping: {time.time() - t_stepping_start}")
         print("Action counts: ", action_count)
+        print('replay buffer length: ', len(buffer))
 
         writer.add_scalar("mean_r", total_r / local_step, global_step);
         writer.add_scalar("episode", ep, global_step);
         writer.add_scalar("temperature", temperature, global_step);
         writer.add_scalar("SPS", int(global_step / (time.time() - start_time)), global_step)
         writer.add_histogram("actions", np.array(action_log), global_step)
-        writer.add_scalar("number of episodes", local_step, global_step)
 
         percent_forward, percent_jump, percent_look = logger.action_types(action_log)
         writer.add_scalar("percent time moving forward", percent_forward, global_step)
@@ -554,26 +580,7 @@ def train(args=None):
 
         if args.track:
             wandb.log({"total episode reward": total_r})
-        train_loss = 0
-        t_training_start = time.time()
-        for _ in range(num_update_per_epoch):
-            transition_batch = buffer.sample(num_trajectory=num_trajectory,
-                                              sample_per_trajectory=sample_per_trajectory,
-                                              k_steps=k_steps)
-            loss_metric = model.update(transition_batch)
-            train_loss += loss_metric['loss']
-        print(f"Time training: {time.time() - t_training_start}")
 
-        print("model updated")
-
-        _, new_test_policy, _ = model.act(subkey, test_obs, 
-                                    with_pi=True, 
-                                    with_value=True, 
-                                    obs_from_batch=False,
-                                    num_simulations=num_simulations,
-                                    temperature=temperature,
-                                    max_depth = None)
-        
         writer.add_scalar("KL divergence", logger.kl_divergence(old_test_policy[0], new_test_policy[0]), global_step)
 
         old_test_policy = new_test_policy
@@ -641,4 +648,6 @@ if __name__ == '__main__':
         if args.render:
             envs.call_async('render')
             envs.call_wait()
-        # if i%50 == 0: envs.reset()
+        if i%10 == 0:
+            print('resetting...')
+            envs.reset()
