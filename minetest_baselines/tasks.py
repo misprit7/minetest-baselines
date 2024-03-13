@@ -1,5 +1,10 @@
 import gymnasium as gym
-from gymnasium.wrappers import FrameStack, GrayScaleObservation, ResizeObservation, TimeLimit
+from gymnasium.wrappers import (
+    FrameStack,
+    GrayScaleObservation,
+    ResizeObservation,
+    TimeLimit,
+)
 from minetester.minetest_env import Minetest
 
 from minetest_baselines.wrappers import (
@@ -10,26 +15,29 @@ from minetest_baselines.wrappers import (
     FlattenMultiDiscreteActions,
     PenalizeJumping,
     SelectKeyActions,
+    ToFloat32Reward,
     PenalizeLookingUpAndDown,
 )
 
 
-def wrapped_treechop_env(**kwargs):
+def wrapped_treechop_env(max_env_steps = 1500, **kwargs):
     env = Minetest(
         **kwargs,
     )
-    env = TimeLimit(env, 500)
-    # action space wrappers
-    # env = DiscreteMouseAction(
-    #     env,
-    #     num_mouse_bins=3,
-    #     max_mouse_move=1,
-    #     quantization_scheme="linear",
-    # )
+    print(f"I made an environment with max time steps {max_env_steps}")
+    env = TimeLimit(env, max_env_steps)
+    # simplify mouse actions
+    env = DiscreteMouseAction(
+        env,
+        num_mouse_bins=3,
+        max_mouse_move=0.05,
+        quantization_scheme="linear",
+    )
     # make breaking blocks easier to learn
     env = AlwaysDig(env)
     # only allow basic movements
     env = SelectKeyActions(env, select_keys={"JUMP", "FORWARD"})
+    # env = SelectKeyActions(env, select_keys={"FORWARD"})
     # jumping usually interrupts progress towards
     # breaking nodes; apply penalty to learn faster
     env = PenalizeJumping(env, 0.01)
@@ -40,7 +48,9 @@ def wrapped_treechop_env(**kwargs):
     env = ResizeObservation(env, (64, 64))
     env = GrayScaleObservation(env, keep_dim=False)
     # facilitate learning dynamics
-    env = FrameStack(env, 4)
+    env = FrameStack(env, 4, lz4_compress=True)
+    # cast rewards to float32
+    env = ToFloat32Reward(env)
     return env
 
 
@@ -55,5 +65,5 @@ for task, version, entry_point in TASKS:
     gym.register(
         f"minetester-{task}-v{version}",
         entry_point=f"{entry_point.__module__}:{entry_point.__name__}",
-        kwargs=dict(clientmods=[f"{task}_v{version}"]),
+        kwargs=dict(clientmods=[f"{task}_v{version}"], render_mode="rgb_array"),
     )
