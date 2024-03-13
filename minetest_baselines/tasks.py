@@ -23,7 +23,7 @@ def wrapped_treechop_env(**kwargs):
     env = Minetest(
         **kwargs,
     )
-    env = TimeLimit(env, 50)
+    env = TimeLimit(env, 500)
     # simplify mouse actions
     env = DiscreteMouseAction(
         env,

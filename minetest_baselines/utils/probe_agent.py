@@ -9,16 +9,16 @@ from minetest_baselines.curriculum import (
 render = True
 max_steps = 100
 
-env_id = "minetester-treechop_shaped-v0"
+env_id = "minetester-treechop_curriculum-v0"
 seed = "0"
 
 env_dirs = ["../../../../minetest/worlds/test", "../../../../minetest/worlds/world1", "../../../../minetest/worlds/world1", "../../../../minetest/worlds/world1"]
-curr = SequentialCurriculum(env_dirs)
+curr = SequentialCurriculum(env_dirs, num_resets = 2)
 
 env = gym.make(
             env_id,
-            # curriculum = curr,
-            # world_dir = env_dirs[0],
+            curriculum = curr,
+            world_dir = env_dirs[0],
             headless=False,
             start_xvfb=True,
             env_port=5555,
