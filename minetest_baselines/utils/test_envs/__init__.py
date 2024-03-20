@@ -7,6 +7,7 @@ from minetest_baselines.utils.test_envs.probe_envs import TwoActionTwoObservatio
 from minetest_baselines.utils.test_envs.probe_envs import TwoActionTwoRewardThirtyTwoSteps
 from minetest_baselines.utils.test_envs.probe_envs import OneActionOneRewardThirtyTwoSteps
 from minetest_baselines.utils.test_envs.probe_envs import TwoActionTwoObservationTwoRewardThirtyTwoSteps
+from minetest_baselines.utils.test_envs.probe_envs import ThirtySixActionTwoRewardThirtyTwoSteps
 
 
 ## For DQN, PPO, etc.
@@ -51,5 +52,11 @@ register(
 register(
     id='TwoActionTwoObservationTwoRewardThirtyTwoSteps-v0',
     entry_point='minetest_baselines.utils.test_envs:TwoActionTwoObservationTwoRewardThirtyTwoSteps',
+    max_episode_steps=32,
+)
+
+register(
+    id='ThirtySixActionTwoRewardThirtyTwoSteps-v0',
+    entry_point='minetest_baselines.utils.test_envs:ThirtySixActionTwoRewardThirtyTwoSteps',
     max_episode_steps=32,
 )

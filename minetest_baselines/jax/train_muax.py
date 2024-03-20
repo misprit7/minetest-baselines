@@ -86,6 +86,15 @@ def parse_args(args=None):
         help="whether minetest requires xvfb to run",
     )
 
+    parser.add_argument(
+        "--render",
+        type=lambda x: bool(strtobool(x)),
+        default=False,
+        nargs="?",
+        const=True,
+        help="whether to render game live (doesn't work with xvfb)",
+    )
+
     # Algorithm specific
     parser.add_argument(
         "--env-id",
@@ -180,20 +189,19 @@ def suppress_warnings():
 # This is similar to dqn, not entirely sure but I think this awkward helper function
 # is to prevent a lambda from capturing an indexing variables whne making the 
 # SyncVectorEnv
-def make_env(env_id, seed, idx, capture_video, run_name, max_env_steps = 1000, xvfb=False, world_dir = None, config_path = None):
+def make_env(env_id, seed, idx, capture_video, run_name, xvfb=False, render=False, world_dir = None, config_path = None):
     def thunk():
         env = gym.make(
             env_id,
-            max_env_steps=max_env_steps,
             world_seed=seed,
             start_xvfb=False, #True for remote, false for local
             headless=(not xvfb),
             env_port=5555+idx,
             server_port=30000+idx,
-            x_display=4,
-            render_mode="rgb_array",
-            world_dir=world_dir,
-            config_path=config_path
+            #x_display=4,
+            render_mode='human' if render else 'rgb_array',
+            world_dir = world_dir,
+            config_path = config_path
         )
         env = LazyWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -202,7 +210,7 @@ def make_env(env_id, seed, idx, capture_video, run_name, max_env_steps = 1000, x
             env = gym.wrappers.RecordVideo(
                 env,
                 f"videos/{run_name}",
-                lambda x: x % 5 == 0,
+                lambda x: x % 20 == 0,
             )
 
 
@@ -251,20 +259,20 @@ def train(args=None):
 
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
-    subprocess.call("./worlds/CopyWorld.sh")
+    # subprocess.call("./worlds/CopyWorld.sh")
 
     # Set up minetest
     if args.xvfb:
         start_xserver(0)
     envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env_id,
-                 args.seed,
-                 i,
-                 args.capture_video,
-                 run_name,
-                 max_env_steps = args.max_env_steps,
-                 xvfb = args.xvfb,
-                 world_dir = args.world_dir + '/' + str(i),
+        make_env(args.env_id, 
+                 args.seed, 
+                 i, 
+                 args.capture_video, 
+                 'test', 
+                 xvfb = args.xvfb, 
+                 render = args.render,
+                 world_dir = args.world_dir + '/' + str(i) if args.world_dir else None,
                  config_path = args.config_path)
         for i in range(args.num_envs)
     ])
@@ -631,7 +639,7 @@ def train(args=None):
 
     # Cleans the worlds after done running each one
     # In DQN This went after envs.close(), but I think this just needs to be done after training sometime. 
-    subprocess.call("./worlds/CleanWorlds.sh")
+    # subprocess.call("./worlds/CleanWorlds.sh")
 
 
     print(model_path)

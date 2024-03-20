@@ -65,7 +65,7 @@ def kl_divergence(old_policy, new_policy):
     return kl_divergence
 
 def action_types(action_log: list):
-    total_actions = np.sum(action_log)
+    total_actions = np.size(action_log)
     
     look_up = 0
     look_forward = 0

@@ -369,3 +369,54 @@ class TwoActionTwoObservationTwoRewardThirtyTwoSteps(gym.Env):
 
     def close(self):
         return
+
+class ThirtySixActionTwoRewardThirtyTwoSteps(gym.Env):
+    metadata = {"render_modes": ["human", "rgb_array"]}
+    def __init__(self, **kwargs):
+        self.observation_shape = (128, 128, 1)
+        self.observation_space = spaces.Box(low = np.zeros(self.observation_shape), 
+                                            high = np.ones(self.observation_shape) * 255)
+        self.action_space = spaces.Discrete(36)
+        self.terminated = False
+        self.stepnum = 0
+
+    def step(self, action):
+        if action % 18 >= 9:
+            reward = -1
+        else:
+            reward = 0
+        self.stepnum += 1
+
+        if self.stepnum == 32:
+            self.terminated = True
+
+        observation = self._get_obs()
+        info = self._get_info()
+
+        print(f"Action {action} Reward {reward}")
+
+        return observation, reward, self.terminated, False, info
+
+    def _get_obs(self):
+        self.curr_observation = np.zeros(self.observation_shape, dtype = np.float32) if np.random.random() < 0.5 else np.ones(self.observation_shape,  dtype = np.float32) * 255
+        return self.curr_observation
+
+    def _get_info(self):
+        if self.terminated:
+            return {"terminal_observation": self.curr_observation}
+        else:
+            return {}
+
+    def reset(self, seed=None, options=None):
+        # We need the following line to seed self.np_random
+        super().reset(seed=seed)
+
+        observation = self._get_obs()
+        info = self._get_info()
+        self.terminated = False
+        self.stepnum = 0
+
+        return observation, info
+
+    def close(self):
+        return
