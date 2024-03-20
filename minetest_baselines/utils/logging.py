@@ -46,7 +46,6 @@ def kl_divergence(old_policy, new_policy):
     -------
     Kullback-Leibler divergence
     """
-    print("calculating divergence :)")
 
     if len(old_policy) != len(new_policy):
         return np.nan
@@ -60,12 +59,11 @@ def kl_divergence(old_policy, new_policy):
             new_policy = new_policy.at[i].set(1e-12)
         
         kl_divergence += new_policy[i] * np.log(new_policy[i] / old_policy[i])
-    print("done calculating divergence :)")
 
     return kl_divergence
 
 def action_types(action_log: list):
-    total_actions = np.size(action_log)
+    total_actions = len(action_log)
     
     look_up = 0
     look_forward = 0

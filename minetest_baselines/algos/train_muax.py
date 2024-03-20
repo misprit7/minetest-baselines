@@ -1,15 +1,17 @@
-
 import argparse
 import os
 import time
 from distutils.util import strtobool
 import warnings
+import subprocess
+import pdb
 
 import jax
 from jax import numpy as jnp
 
 import muax
 from muax import nn
+import pdb
 
 from tensorboardX import SummaryWriter
 
@@ -220,13 +222,37 @@ def make_env(env_id, seed, idx, capture_video, run_name, xvfb=False, render=Fals
 
     return thunk
 
+def make_envs(num_envs, env_id, seed, base_idx, capture_video, run_name, xvfb=False, render=False):
+    envs = gym.vector.AsyncVectorEnv([
+        make_env(env_id, seed, base_idx+i, capture_video, run_name, xvfb, render)
+        for i in range(num_envs)
+    ])
+    return envs
+
+# Extremely hacky, tried for a long time to avoid doing something like this
+def reset_envs(envs, envs_args, seed=None):
+    # Retry several times
+    for _ in range(20):
+        envs.reset_async(seed=seed)
+        try:
+            obs, info = envs.reset_wait(10)
+            return obs, info, envs
+        except:
+            print('Reset failed! Making new envs...')
+            envs.close(terminate=True)
+            time.sleep(0.5)
+            subprocess.run(["pkill", "-9", "minetest"])
+            time.sleep(0.5)
+            envs = make_envs(*envs_args)
+
 # Test function, taken from Muax and modified for sync vector
 # For simplicity also changed so that each test is run on num_envs episodes
-def test(model, envs, key, num_simulations, max_env_steps, random_seed=None):
+def test(model, envs, key, num_simulations, max_env_steps, envs_args, random_seed=None):
     num_envs = envs.num_envs
     total_reward = np.zeros(num_envs)
 
-    obs, info = envs.reset(seed=random_seed)
+    obs, info, envs = reset_envs(envs, envs_args)
+
     for t in range(max_env_steps):
         key, subkey = jax.random.split(key)
         a = model.act(subkey, obs, 
@@ -259,7 +285,7 @@ def train(args=None):
 
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
-    # subprocess.call("./worlds/CopyWorld.sh")
+    subprocess.call("./worlds/CopyWorld.sh")
 
     # Set up minetest
     if args.xvfb:
@@ -277,12 +303,12 @@ def train(args=None):
         for i in range(args.num_envs)
     ])
 
-    # Not strictly neccessary, but it's a good canary to see if background unkilled minetest instances make this hang
+    # envs_args = (args.num_envs, args.env_id, args.seed, 0, args.capture_video, run_name, args.xvfb, args.render)
+    # envs = make_envs(*envs_args)
+
     print("Start envs sanity check")
-    obs, _ = envs.reset()
-    print("Envs reset")
+    obs, _, envs = reset_envs(envs, envs_args)
     test_obs = obs[0]
-    print(type(obs))
     print("envs working")
 
 
@@ -378,10 +404,8 @@ def train(args=None):
     model_save_path = None
     save_name = None
     test_interval = 10
-    num_test_episodes = 10
     test_env = envs
-    # buffer_warm_up = 32
-    buffer_warm_up = 1
+    buffer_warm_up = 0
 
     num_update_per_epoch = args.updates_per_epoch
     episodes_per_epoch = args.episodes_per_epoch
@@ -405,6 +429,9 @@ def train(args=None):
     key = jax.random.PRNGKey(random_seed)
     key, test_key, subkey = jax.random.split(key, num=3)
     model.init(subkey, sample_input) 
+    # Use this to load preexisting model
+    # model.load('/mnt/disks/persist/ubcmtest/xander/minetest-baselines/models/2024-03-06_07-58-09/epoch_0200_loss_2.55634653/model_params.npy')
+
 
     training_step = 0
     best_test_G = -float('inf')
@@ -414,7 +441,7 @@ def train(args=None):
     print('buffer warm up stage...')
     while len(buffer) < buffer_warm_up:
         print(f"New buffer warmup episode: {len(buffer)}")
-        obs, _ = envs.reset()    
+        obs, _, envs = reset_envs(envs, envs_args, random_seed)
         for tracer in tracers: tracer.reset()
         trajectories = [muax.Trajectory() for _ in range(args.num_envs)]
         temperature = temperature_fn(max_epochs=max_epochs, training_epochs=0)
@@ -446,7 +473,7 @@ def train(args=None):
                         buffer.add(trajectory, trajectory.batched_transitions.w.mean())
                     trajectories[i] = muax.Trajectory()
                     episodes_finished += 1
-                    #print('finished early:', t)
+                    # print('finished early:', t)
 
             if episodes_finished >= episodes_per_epoch:
                 break
@@ -473,14 +500,14 @@ def train(args=None):
                             with_value=True, 
                             obs_from_batch=False,
                             num_simulations=num_simulations,
-                            temperature=temperature,
+                            temperature=1,
                             max_depth = None)
     
     for ep in range(max_epochs):
         print(f"New epoch: {ep}")
-        obs, info = envs.reset(seed=random_seed)   
+        obs, _, envs = reset_envs(envs, envs_args, random_seed)
         for tracer in tracers: tracer.reset()
-        trajectories = muax.Trajectory()
+        trajectories = [muax.Trajectory() for _ in range(args.num_envs)]
         temperature = temperature_fn(max_epochs=max_epochs, training_epochs=ep)
 
         # Logging metrics
@@ -496,7 +523,8 @@ def train(args=None):
         episodes_finished = 0
         t_stepping_start = time.time()
         for t in range(max_env_steps):
-            # if t%30 == 0: print('buffer step')
+            if t%30 == 0:
+                print('train step, SPS: ', t/(time.time()-t_stepping_start))
             key, subkey = jax.random.split(key)
             a, pi, v = model.act(subkey, obs, 
                            with_pi=True, 
@@ -504,8 +532,11 @@ def train(args=None):
                            obs_from_batch=True,
                            num_simulations=num_simulations,
                            temperature=temperature)
-
             obs_next, r, done, truncated, info = envs.step(a)
+            if args.render:
+                envs.call_async('render')
+                envs.call_wait()
+
             global_step += args.num_envs
             local_step += args.num_envs
 
@@ -521,6 +552,7 @@ def train(args=None):
   #             r = 1 / (1 - tracer.gamma)
             for i, (tracer, trajectory) in enumerate(zip(tracers, trajectories)):
                 tracer.add(obs[i], a[i], r[i], done[i] or truncated[i], v=v[i], pi=pi[i])
+                # print('a: ', a[i], 'r: ', r[i])
 
                 writer.add_scalar(
                     "relative entropy",
@@ -530,19 +562,9 @@ def train(args=None):
                 while tracer:
                     trans = tracer.pop()
                     trajectory.add(trans)
-                    # env.record_metrics({'v': trans.v, 'Rn': trans.Rn})
-                    # writer.add_scalar(
-                    #     "v",
-                    #     trans.v,
-                    #     global_step
-                    # )
-                    # writer.add_scalar(
-                    #     "Rn",
-                    #     trans.Rn,
-                    #     global_step
-                    # )
                 if done[i] or truncated[i]:
                     # Note: sync vector is automatically reset, so no need to do it manually
+                    # print("Env finished")
                     if len(trajectory) >= k_steps:
                         trajectory.finalize()
                         buffer.add(trajectory, trajectory.batched_transitions.w.mean())
@@ -563,15 +585,42 @@ def train(args=None):
         #######################################################################
         # Training
         #######################################################################
+        train_loss = 0
+        t_training_start = time.time()
+        for _ in range(num_update_per_epoch):
+            transition_batch = buffer.sample(num_trajectory=num_trajectory,
+                                              sample_per_trajectory=sample_per_trajectory,
+                                              k_steps=k_steps)
+
+            #obs = transition_batch[0].obs[0]
+            #print(model.representation(obs))
+            #pdb.set_trace()
+            loss_metric = model.update(transition_batch)
+            train_loss += loss_metric['loss']
+        print(f"Time training: {time.time() - t_training_start}")
+
+        print("model updated")
+
+        _, new_test_policy, _ = model.act(subkey, test_obs,
+                                    with_pi=True, 
+                                    with_value=True, 
+                                    obs_from_batch=False,
+                                    num_simulations=num_simulations,
+                                    temperature=temperature,
+                                    max_depth = None)
+        
+        #######################################################################
+        # Logging
+        #######################################################################
         print(f"Time stepping: {time.time() - t_stepping_start}")
         print("Action counts: ", action_count)
+        print('replay buffer length: ', len(buffer))
 
         writer.add_scalar("mean_r", total_r / local_step, global_step);
         writer.add_scalar("episode", ep, global_step);
         writer.add_scalar("temperature", temperature, global_step);
         writer.add_scalar("SPS", int(global_step / (time.time() - start_time)), global_step)
         writer.add_histogram("actions", np.array(action_log), global_step)
-        writer.add_scalar("number of episodes", local_step, global_step)
 
         percent_forward, percent_jump, percent_look = logger.action_types(action_log)
         writer.add_scalar("percent time moving forward", percent_forward, global_step)
@@ -581,26 +630,7 @@ def train(args=None):
 
         if args.track:
             wandb.log({"total episode reward": total_r})
-        train_loss = 0
-        t_training_start = time.time()
-        for _ in range(num_update_per_epoch):
-            transition_batch = buffer.sample(num_trajectory=num_trajectory,
-                                              sample_per_trajectory=sample_per_trajectory,
-                                              k_steps=k_steps)
-            loss_metric = model.update(transition_batch)
-            train_loss += loss_metric['loss']
-        print(f"Time training: {time.time() - t_training_start}")
 
-        print("model updated")
-
-        _, new_test_policy, _ = model.act(subkey, test_obs, 
-                                    with_pi=True, 
-                                    with_value=True, 
-                                    obs_from_batch=False,
-                                    num_simulations=num_simulations,
-                                    temperature=temperature,
-                                    max_depth = None)
-        
         writer.add_scalar("KL divergence", logger.kl_divergence(old_test_policy[0], new_test_policy[0]), global_step)
 
         old_test_policy = new_test_policy
@@ -625,7 +655,7 @@ def train(args=None):
         #######################################################################
         t_testing_start = time.time()
         if ep % test_interval == 0:
-            test_G = test(model, test_env, test_key, num_simulations=num_simulations, max_env_steps=max_env_steps)
+            test_G = test(model, test_env, test_key, num_simulations=num_simulations, max_env_steps=max_env_steps, envs_args=envs_args)
             writer.add_scalar("test_G", test_G, global_step)
             print(f"TEST RESULT {test_G}")
             if test_G >= best_test_G:
@@ -639,7 +669,7 @@ def train(args=None):
 
     # Cleans the worlds after done running each one
     # In DQN This went after envs.close(), but I think this just needs to be done after training sometime. 
-    # subprocess.call("./worlds/CleanWorlds.sh")
+    subprocess.call("./worlds/CleanWorlds.sh")
 
 
     print(model_path)
@@ -652,19 +682,27 @@ if __name__ == '__main__':
     if args.xvfb:
         start_xserver(0)
     print("Starting, num envs:", args.num_envs)
-    envs = gym.vector.AsyncVectorEnv([
-        make_env(args.env_id, args.seed, i, False, 'test', args.xvfb)
-        for i in range(args.num_envs)
-    ])
+
+    envs_args = (args.num_envs, args.env_id, args.seed, 10, False, 'test', args.xvfb, args.render)
+    envs = make_envs(*envs_args)
+    # env = make_env(args.env_id, args.seed, args.num_envs+1, False, 'test', args.xvfb, args.render)()
 
     print("Start envs sanity check")
     obs, _ = envs.reset()
+    # obs1, _ = env.reset()
     print(type(obs))
     print("envs working")
 
-    num_steps = int(5000 / args.num_envs)
+    # env.render()
+
+    num_steps = int(20000 / args.num_envs)
     t_start = time.time()
     for i in range(num_steps):
         print('Steps per second: ', i*args.num_envs/(time.time()-t_start))
         obs, _, _, _, _ = envs.step([4]*args.num_envs)
-        if i%50 == 0: envs.reset()
+        if args.render:
+            envs.call_async('render')
+            envs.call_wait()
+        if i%10 == 0: 
+            print('resetting...')
+            _, _, envs = reset_envs(envs, envs_args)
