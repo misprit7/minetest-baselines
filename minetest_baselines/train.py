@@ -1,6 +1,6 @@
 import argparse
 
-from minetest_baselines.algos import ALGOS
+from minetest_baselines.algos_list import ALGOS
 
 
 def parse_arguments():

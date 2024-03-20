@@ -1,4 +1,3 @@
-
 import argparse
 import os
 import time
@@ -12,6 +11,7 @@ from jax import numpy as jnp
 
 import muax
 from muax import nn
+import pdb
 
 from tensorboardX import SummaryWriter
 
@@ -514,6 +514,7 @@ def train(args=None):
   #             r = 1 / (1 - tracer.gamma)
             for i, (tracer, trajectory) in enumerate(zip(tracers, trajectories)):
                 tracer.add(obs[i], a[i], r[i], done[i] or truncated[i], v=v[i], pi=pi[i])
+                # print('a: ', a[i], 'r: ', r[i])
 
                 writer.add_scalar(
                     "relative entropy",
@@ -546,24 +547,6 @@ def train(args=None):
         #######################################################################
         # Training
         #######################################################################
-        print(f"Time stepping: {time.time() - t_stepping_start}")
-        print("Action counts: ", action_count)
-
-        writer.add_scalar("mean_r", total_r / local_step, global_step);
-        writer.add_scalar("episode", ep, global_step);
-        writer.add_scalar("temperature", temperature, global_step);
-        writer.add_scalar("SPS", int(global_step / (time.time() - start_time)), global_step)
-        writer.add_histogram("actions", np.array(action_log), global_step)
-        writer.add_scalar("number of episodes", local_step, global_step)
-
-        percent_forward, percent_jump, percent_look = logger.action_types(action_log)
-        writer.add_scalar("percent time moving forward", percent_forward, global_step)
-        writer.add_scalar("percent time jumping", percent_jump, global_step)
-        writer.add_scalars("percent time looking looking", percent_look, global_step)
-
-
-        if args.track:
-            wandb.log({"total episode reward": total_r})
         train_loss = 0
         t_training_start = time.time()
         for _ in range(num_update_per_epoch):
@@ -580,7 +563,7 @@ def train(args=None):
 
         print("model updated")
 
-        _, new_test_policy, _ = model.act(subkey, test_obs, 
+        _, new_test_policy, _ = model.act(subkey, test_obs,
                                     with_pi=True, 
                                     with_value=True, 
                                     obs_from_batch=False,
@@ -588,6 +571,28 @@ def train(args=None):
                                     temperature=temperature,
                                     max_depth = None)
         
+        #######################################################################
+        # Logging
+        #######################################################################
+        print(f"Time stepping: {time.time() - t_stepping_start}")
+        print("Action counts: ", action_count)
+        print('replay buffer length: ', len(buffer))
+
+        writer.add_scalar("mean_r", total_r / local_step, global_step);
+        writer.add_scalar("episode", ep, global_step);
+        writer.add_scalar("temperature", temperature, global_step);
+        writer.add_scalar("SPS", int(global_step / (time.time() - start_time)), global_step)
+        writer.add_histogram("actions", np.array(action_log), global_step)
+
+        percent_forward, percent_jump, percent_look = logger.action_types(action_log)
+        writer.add_scalar("percent time moving forward", percent_forward, global_step)
+        writer.add_scalar("percent time jumping", percent_jump, global_step)
+        writer.add_scalars("percent time looking looking", percent_look, global_step)
+
+
+        if args.track:
+            wandb.log({"total episode reward": total_r})
+
         writer.add_scalar("KL divergence", logger.kl_divergence(old_test_policy[0], new_test_policy[0]), global_step)
 
         old_test_policy = new_test_policy
@@ -657,4 +662,3 @@ if __name__ == '__main__':
         if i%10 == 0: 
             print('resetting...')
             _, _, envs = reset_envs(envs, envs_args)
-
